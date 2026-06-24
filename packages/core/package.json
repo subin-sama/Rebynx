@@ -1,0 +1,32 @@
+{
+  "name": "@rebynx/core",
+  "version": "0.1.0",
+  "description": "Platform-agnostic engine (collectors, hub, sinks) for Rebynx — hybrid React Native devtools.",
+  "keywords": ["react-native", "devtools", "debugging", "logger", "network-inspector", "redux", "zustand", "rebynx"],
+  "license": "MIT",
+  "author": "Bynx",
+  "homepage": "https://github.com/bynx/rebynx#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bynx/rebynx.git",
+    "directory": "packages/core"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

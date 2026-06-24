@@ -1,0 +1,33 @@
+{
+  "name": "rebynx",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hybrid devtools for React Native — in-app overlay + browser client from one engine.",
+  "keywords": [
+    "react-native",
+    "devtools",
+    "debugging",
+    "rebynx"
+  ],
+  "license": "MIT",
+  "author": "Bynx",
+  "homepage": "https://github.com/bynx/rebynx#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bynx/rebynx.git"
+  },
+  "scripts": {
+    "build": "pnpm --filter @rebynx/core build && pnpm --filter @rebynx/server build",
+    "build:core": "pnpm --filter @rebynx/core build",
+    "build:server": "pnpm --filter @rebynx/server build",
+    "server": "pnpm --filter @rebynx/server start",
+    "server:dev": "pnpm --filter @rebynx/server dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.9"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

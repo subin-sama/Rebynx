@@ -1,0 +1,32 @@
+{
+  "name": "@rebynx/rn",
+  "version": "0.1.0",
+  "description": "React Native client for Rebynx — draggable in-app devtools overlay + WebSocket bridge to the browser.",
+  "keywords": ["react-native", "devtools", "debugging", "overlay", "inspector", "rebynx"],
+  "license": "MIT",
+  "author": "Bynx",
+  "homepage": "https://github.com/bynx/rebynx#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bynx/rebynx.git",
+    "directory": "packages/rn"
+  },
+  "main": "./src/index.ts",
+  "react-native": "./src/index.ts",
+  "source": "./src/index.ts",
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "dependencies": {
+    "@rebynx/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "typescript": "^5.6.0"
+  }
+}

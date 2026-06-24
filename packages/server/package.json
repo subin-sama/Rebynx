@@ -1,0 +1,36 @@
+{
+  "name": "@rebynx/server",
+  "version": "0.1.0",
+  "description": "WebSocket relay + browser client host for Rebynx hybrid React Native devtools.",
+  "keywords": ["react-native", "devtools", "debugging", "relay", "websocket", "rebynx"],
+  "license": "MIT",
+  "author": "Bynx",
+  "homepage": "https://github.com/bynx/rebynx#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bynx/rebynx.git",
+    "directory": "packages/server"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "rebynx-server": "./bin/cli.mjs"
+  },
+  "files": ["dist", "public", "bin"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.12",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
