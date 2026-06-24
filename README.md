@@ -126,13 +126,58 @@ file opens in your editor (jump-to-code). Configurable port via `DEVTOOLS_PORT`.
 | `@rebynx/rn` | React Native client: `initDevTools()` + `<DevToolsOverlay/>` |
 | `@rebynx/server` | Node relay + browser client + jump-to-code endpoint |
 
-## Develop
+## Local Development & Testing
 
+### 1. Build and Run Server Locally
+To build the packages and start the WebSocket relay server in this repository:
 ```bash
+# Install dependencies
 pnpm install
-pnpm build:core      # compile the engine
-pnpm server          # start the relay (http://localhost:9090)
+
+# Compile the packages (core and server)
+pnpm build
+
+# Start the WebSocket relay server (defaults to port 9090)
+pnpm server
 ```
+
+### 2. Run Unit Tests
+To run the Vitest test suite:
+```bash
+pnpm test
+```
+
+### 3. Test/Use Packages Locally in another React Native App
+Because React Native's Metro packager has known issues resolving symbolic links (from `npm link` or `pnpm link`), we highly recommend using **`yalc`** to test your local modifications:
+
+#### A. Install yalc globally:
+```bash
+npm install -g yalc
+```
+
+#### B. Publish your local packages to the yalc registry:
+Whenever you make changes to the codebase and build, run the following:
+```bash
+# Build the latest code
+pnpm build
+
+# Publish package core and rn
+cd packages/core && yalc publish
+cd ../rn && yalc publish
+```
+
+#### C. Consume the package in your React Native app:
+Navigate to your test React Native application and run:
+```bash
+# Add the local dependency
+yalc add @rebynx/rn
+
+# Install the dependencies
+npm install   # or yarn install / pnpm install
+```
+
+If you modify Rebynx code again later, simply rebuild and run `yalc push` in the Rebynx package directories to automatically push changes to your application.
+
 
 ## Caveats (honest ones)
 

@@ -38,12 +38,23 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
 | Hermes-only | we hook the JS layer, not the Hermes debugger → works on JSC too |
 | Native debugging | **not solved** — anything below the JS bridge still needs Xcode/Android Studio |
 
-## Run it
+## Run, Test & Link Locally
 
 ```bash
 pnpm install
-pnpm build:core          # compile the engine
-pnpm server              # http://localhost:9090  (browser client + relay)
+pnpm build               # compile the packages (core + server)
+pnpm server              # start relay server (http://localhost:9090)
+pnpm test                # run vitest test suite
+pnpm typecheck           # run typescript compiler checks
+```
+
+For testing in local React Native apps (solves Metro symlink issues):
+```bash
+npm install -g yalc
+pnpm build
+(cd packages/core && yalc publish)
+(cd packages/rn && yalc publish)
+# Then run `yalc add @rebynx/rn` in your target React Native app
 ```
 
 In your RN app:
