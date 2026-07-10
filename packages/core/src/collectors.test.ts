@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Hub } from './hub.js';
 import {
   installConsole,
+  installNetwork,
   createReduxMiddleware,
   trackZustand,
   trackStore,
@@ -48,6 +49,117 @@ describe('collectors', () => {
       expect(emittedEvents[0].level).toBe('log');
       expect(emittedEvents[0].message).toBe('hello world {"a":1}');
       expect(emittedEvents[0].args).toBeDefined();
+
+      uninstall();
+    });
+  });
+
+  describe('installNetwork', () => {
+    const originalFetch = globalThis.fetch;
+    const originalXHR = (globalThis as any).XMLHttpRequest;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      (globalThis as any).XMLHttpRequest = originalXHR;
+    });
+
+    it('should capture fetch requests', async () => {
+      (globalThis as any).XMLHttpRequest = undefined;
+      const response = new Response(JSON.stringify({ ok: true }), {
+        status: 201,
+        headers: { 'content-type': 'application/json', 'x-test': 'yes' },
+      });
+      globalThis.fetch = vi.fn(async () => response) as any;
+
+      const uninstall = installNetwork(hub);
+
+      const res = await fetch('https://example.test/items', {
+        method: 'POST',
+        headers: { 'x-client': 'test' },
+        body: JSON.stringify({ name: 'Ada' }),
+      });
+
+      expect(res.status).toBe(201);
+      expect(emittedEvents).toHaveLength(2);
+      expect(emittedEvents[0]).toMatchObject({
+        type: 'network',
+        phase: 'start',
+        method: 'POST',
+        url: 'https://example.test/items',
+        reqHeaders: { 'x-client': 'test' },
+        reqBody: JSON.stringify({ name: 'Ada' }),
+      });
+      expect(emittedEvents[1]).toMatchObject({
+        type: 'network',
+        phase: 'end',
+        method: 'POST',
+        url: 'https://example.test/items',
+        status: 201,
+        ok: true,
+        resHeaders: { 'content-type': 'application/json', 'x-test': 'yes' },
+        resBody: { ok: true },
+      });
+
+      uninstall();
+    });
+
+    it('should capture XHR requests', () => {
+      globalThis.fetch = undefined as any;
+
+      class MockXHR {
+        static last: MockXHR;
+        status = 204;
+        responseType = '';
+        responseText = '{"done":true}';
+        private listeners: Record<string, () => void> = {};
+        private rawHeaders = 'x-response: ok';
+
+        constructor() {
+          MockXHR.last = this;
+        }
+
+        open(_method: string, _url: string) {}
+        send(_body?: unknown) {}
+        setRequestHeader(_key: string, _value: string) {}
+        addEventListener(event: string, listener: () => void) {
+          this.listeners[event] = listener;
+        }
+        getAllResponseHeaders() {
+          return this.rawHeaders;
+        }
+        finish() {
+          this.listeners.loadend();
+        }
+      }
+
+      (globalThis as any).XMLHttpRequest = MockXHR;
+      const uninstall = installNetwork(hub);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', 'https://example.test/users/1');
+      xhr.setRequestHeader('x-client', 'test');
+      xhr.send(JSON.stringify({ name: 'Grace' }));
+      MockXHR.last.finish();
+
+      expect(emittedEvents).toHaveLength(2);
+      expect(emittedEvents[0]).toMatchObject({
+        type: 'network',
+        phase: 'start',
+        method: 'PUT',
+        url: 'https://example.test/users/1',
+        reqHeaders: { 'x-client': 'test' },
+        reqBody: JSON.stringify({ name: 'Grace' }),
+      });
+      expect(emittedEvents[1]).toMatchObject({
+        type: 'network',
+        phase: 'end',
+        method: 'PUT',
+        url: 'https://example.test/users/1',
+        status: 204,
+        ok: true,
+        resHeaders: { 'x-response': 'ok' },
+        resBody: { done: true },
+      });
 
       uninstall();
     });
