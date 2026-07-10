@@ -20,6 +20,7 @@
     "build": "pnpm --filter @rebynx/core build && pnpm --filter @rebynx/server build",
     "build:core": "pnpm --filter @rebynx/core build",
     "build:server": "pnpm --filter @rebynx/server build",
+    "install:rn-app": "pnpm build:core && node scripts/install-rn-app.mjs",
     "server": "pnpm --filter @rebynx/server start",
     "server:dev": "pnpm --filter @rebynx/server dev",
     "typecheck": "pnpm -r typecheck",

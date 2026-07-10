@@ -147,8 +147,52 @@ To run the Vitest test suite:
 pnpm test
 ```
 
-### 3. Test/Use Packages Locally in another React Native App
-Because React Native's Metro packager has known issues resolving symbolic links (from `npm link` or `pnpm link`), we highly recommend using **`yalc`** to test your local modifications:
+### 3. Install into another React Native app locally
+For local app testing without publishing to npm, use the installer. It builds
+`@rebynx/core`, copies `@rebynx/core` and `@rebynx/rn` into the target app, fixes
+the copied RN package dependency to point at the copied core package, and updates
+the app's `package.json` with local `file:` dependencies.
+
+```bash
+pnpm install:rn-app -- /path/to/your-react-native-app
+cd /path/to/your-react-native-app
+yarn install # or npm install / pnpm install, depending on the app
+```
+
+For the Aeoon app in this workspace:
+
+```bash
+pnpm install:rn-app -- /Users/winner/work/aeoon-mobile-react-native
+cd /Users/winner/work/aeoon-mobile-react-native
+yarn install
+```
+
+Then add the normal app wiring if it is not already present:
+
+```ts
+import { initDevTools, DevToolsOverlay } from '@rebynx/rn';
+
+if (__DEV__) {
+  initDevTools({
+    url: 'ws://10.0.2.2:9090', // Android emulator; use LAN IP for device/iOS
+  });
+}
+```
+
+```tsx
+{__DEV__ ? <DevToolsOverlay /> : null}
+```
+
+Start the relay from this repo when you want the browser client:
+
+```bash
+pnpm server
+```
+
+#### Alternative: yalc
+Because React Native's Metro packager has known issues resolving symbolic links
+(from `npm link` or `pnpm link`), `yalc` is another good way to test local
+modifications:
 
 #### A. Install yalc globally:
 ```bash
