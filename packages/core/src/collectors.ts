@@ -35,9 +35,9 @@ export function installConsole(hub: Hub): Teardown {
 
 /* ------------------------------------------------------------------ *
  * 2. NETWORK
- * Patches XMLHttpRequest.prototype rather than RN's private
- * XHRInterceptor. fetch() and axios both run through XHR, so this one
- * hook catches everything — and it works unchanged in the browser.
+ * Patches XMLHttpRequest.prototype and fetch rather than RN's private
+ * XHRInterceptor. RN and app stacks vary in whether fetch goes through XHR,
+ * so covering both public APIs keeps the collector portable.
  * ------------------------------------------------------------------ */
 interface XHRMeta {
   reqId: string;
@@ -45,7 +45,10 @@ interface XHRMeta {
   url: string;
   reqHeaders: Record<string, string>;
   start: number;
+  suppress?: boolean;
 }
+
+let fetchDepth = 0;
 
 function parseHeaders(raw?: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -74,67 +77,194 @@ function readResponse(xhr: XMLHttpRequest): unknown {
   }
 }
 
+function requestInputToUrl(input: RequestInfo | URL): string {
+  if (typeof input === 'string') return input;
+  if (input instanceof URL) return input.toString();
+  return (input as Request).url;
+}
+
+function headersToObject(headers?: HeadersInit): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+
+  try {
+    if (headers instanceof Headers) {
+      headers.forEach((value, key) => {
+        out[key] = value;
+      });
+      return out;
+    }
+  } catch {
+    // Some RN test/runtime shims expose partial Headers implementations.
+  }
+
+  if (Array.isArray(headers)) {
+    for (const [key, value] of headers) out[String(key)] = String(value);
+    return out;
+  }
+
+  for (const [key, value] of Object.entries(headers as Record<string, string>)) {
+    out[key] = String(value);
+  }
+  return out;
+}
+
+function requestHeaders(input: RequestInfo | URL, init?: RequestInit): Record<string, string> {
+  const inputHeaders = typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined;
+  return { ...headersToObject(inputHeaders), ...headersToObject(init?.headers) };
+}
+
+function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
+  return init?.method ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET');
+}
+
+function requestBody(input: RequestInfo | URL, init?: RequestInit): unknown {
+  if (init && 'body' in init) return init.body;
+  return typeof Request !== 'undefined' && input instanceof Request ? '[Request body]' : undefined;
+}
+
+async function readFetchResponseBody(response: Response): Promise<unknown> {
+  try {
+    const contentType = response.headers?.get?.('content-type') ?? '';
+    const clone = response.clone();
+    if (contentType.includes('application/json')) {
+      return await clone.json();
+    }
+    const text = await clone.text();
+    return text && text.length > 5000 ? text.slice(0, 5000) + '…' : text;
+  } catch {
+    return undefined;
+  }
+}
+
 export function installNetwork(hub: Hub): Teardown {
   const XHR: typeof XMLHttpRequest | undefined = (globalThis as any).XMLHttpRequest;
-  if (!XHR) return () => {};
+  const originalFetch: typeof fetch | undefined = (globalThis as any).fetch;
 
-  const proto = XHR.prototype as any;
-  const origOpen = proto.open;
-  const origSend = proto.send;
-  const origSetHeader = proto.setRequestHeader;
+  const teardowns: Teardown[] = [];
 
-  proto.open = function (method: string, url: string, ...rest: unknown[]) {
-    (this as any).__dt = {
-      reqId: uid('n'),
-      method,
-      url,
-      reqHeaders: {},
-      start: 0,
-    } as XHRMeta;
-    return origOpen.call(this, method, url, ...rest);
-  };
+  if (XHR) {
+    const proto = XHR.prototype as any;
+    const origOpen = proto.open;
+    const origSend = proto.send;
+    const origSetHeader = proto.setRequestHeader;
 
-  proto.setRequestHeader = function (key: string, value: string) {
-    const meta = (this as any).__dt as XHRMeta | undefined;
-    if (meta) meta.reqHeaders[key] = value;
-    return origSetHeader.call(this, key, value);
-  };
+    proto.open = function (method: string, url: string, ...rest: unknown[]) {
+      (this as any).__dt = {
+        reqId: uid('n'),
+        method,
+        url,
+        reqHeaders: {},
+        start: 0,
+        suppress: fetchDepth > 0,
+      } as XHRMeta;
+      return origOpen.call(this, method, url, ...rest);
+    };
 
-  proto.send = function (body?: unknown) {
-    const meta = (this as any).__dt as XHRMeta | undefined;
-    if (meta) {
-      meta.start = Date.now();
-      hub.emit({
-        type: 'network',
-        phase: 'start',
-        reqId: meta.reqId,
-        method: meta.method,
-        url: meta.url,
-        reqHeaders: meta.reqHeaders,
-        reqBody: sanitize(body),
-      });
-      this.addEventListener('loadend', () => {
+    proto.setRequestHeader = function (key: string, value: string) {
+      const meta = (this as any).__dt as XHRMeta | undefined;
+      if (meta) meta.reqHeaders[key] = value;
+      return origSetHeader.call(this, key, value);
+    };
+
+    proto.send = function (body?: unknown) {
+      const meta = (this as any).__dt as XHRMeta | undefined;
+      if (meta && !meta.suppress) {
+        meta.start = Date.now();
         hub.emit({
           type: 'network',
-          phase: 'end',
+          phase: 'start',
           reqId: meta.reqId,
           method: meta.method,
           url: meta.url,
-          status: this.status,
-          ok: this.status >= 200 && this.status < 300,
-          duration: Date.now() - meta.start,
-          resHeaders: parseHeaders(this.getAllResponseHeaders?.()),
-          resBody: sanitize(readResponse(this)),
+          reqHeaders: meta.reqHeaders,
+          reqBody: sanitize(body),
         });
+        this.addEventListener('loadend', () => {
+          hub.emit({
+            type: 'network',
+            phase: 'end',
+            reqId: meta.reqId,
+            method: meta.method,
+            url: meta.url,
+            status: this.status,
+            ok: this.status >= 200 && this.status < 300,
+            duration: Date.now() - meta.start,
+            resHeaders: parseHeaders(this.getAllResponseHeaders?.()),
+            resBody: sanitize(readResponse(this)),
+          });
+        });
+      }
+      return origSend.call(this, body as any);
+    };
+
+    teardowns.push(() => {
+      proto.open = origOpen;
+      proto.send = origSend;
+      proto.setRequestHeader = origSetHeader;
+    });
+  }
+
+  if (originalFetch) {
+    (globalThis as any).fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const reqId = uid('n');
+      const method = requestMethod(input, init);
+      const url = requestInputToUrl(input);
+      const start = Date.now();
+      hub.emit({
+        type: 'network',
+        phase: 'start',
+        reqId,
+        method,
+        url,
+        reqHeaders: requestHeaders(input, init),
+        reqBody: sanitize(requestBody(input, init)),
       });
-    }
-    return origSend.call(this, body as any);
-  };
+
+      try {
+        fetchDepth += 1;
+        let responsePromise: Promise<Response>;
+        try {
+          responsePromise = originalFetch(input as any, init as any);
+        } finally {
+          fetchDepth -= 1;
+        }
+        const response = await responsePromise;
+        hub.emit({
+          type: 'network',
+          phase: 'end',
+          reqId,
+          method,
+          url,
+          status: response.status,
+          ok: response.ok,
+          duration: Date.now() - start,
+          resHeaders: headersToObject(response.headers),
+          resBody: sanitize(await readFetchResponseBody(response)),
+        });
+        return response;
+      } catch (error) {
+        hub.emit({
+          type: 'network',
+          phase: 'end',
+          reqId,
+          method,
+          url,
+          ok: false,
+          duration: Date.now() - start,
+          resBody: sanitize(error),
+        });
+        throw error;
+      }
+    }) as typeof fetch;
+
+    teardowns.push(() => {
+      (globalThis as any).fetch = originalFetch;
+    });
+  }
 
   return () => {
-    proto.open = origOpen;
-    proto.send = origSend;
-    proto.setRequestHeader = origSetHeader;
+    for (const teardown of teardowns.reverse()) teardown();
   };
 }
 
