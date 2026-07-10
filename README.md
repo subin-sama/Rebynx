@@ -132,19 +132,19 @@ file opens in your editor (jump-to-code). Configurable port via `DEVTOOLS_PORT`.
 To build the packages and start the WebSocket relay server in this repository:
 ```bash
 # Install dependencies
-pnpm install
+npm install
 
 # Compile the packages (core and server)
-pnpm build
+npm run build
 
 # Start the WebSocket relay server (defaults to port 9090)
-pnpm server
+npm run server
 ```
 
 ### 2. Run Unit Tests
 To run the Vitest test suite:
 ```bash
-pnpm test
+npm test
 ```
 
 ### 3. Install into another React Native app locally
@@ -154,15 +154,15 @@ the copied RN package dependency to point at the copied core package, and update
 the app's `package.json` with local `file:` dependencies.
 
 ```bash
-pnpm install:rn-app -- /path/to/your-react-native-app
+npm run install:rn-app -- /path/to/your-react-native-app
 cd /path/to/your-react-native-app
-yarn install # or npm install / pnpm install, depending on the app
+npm install # or yarn install, depending on the app
 ```
 
 For the Aeoon app in this workspace:
 
 ```bash
-pnpm install:rn-app -- /Users/winner/work/aeoon-mobile-react-native
+npm run install:rn-app -- /Users/winner/work/aeoon-mobile-react-native
 cd /Users/winner/work/aeoon-mobile-react-native
 yarn install
 ```
@@ -186,12 +186,12 @@ if (__DEV__) {
 Start the relay from this repo when you want the browser client:
 
 ```bash
-pnpm server
+npm run server
 ```
 
 #### Alternative: yalc
 Because React Native's Metro packager has known issues resolving symbolic links
-(from `npm link` or `pnpm link`), `yalc` is another good way to test local
+(from `npm link`), `yalc` is another good way to test local
 modifications:
 
 #### A. Install yalc globally:
@@ -203,7 +203,7 @@ npm install -g yalc
 Whenever you make changes to the codebase and build, run the following:
 ```bash
 # Build the latest code
-pnpm build
+npm run build
 
 # Publish package core and rn
 cd packages/core && yalc publish
@@ -217,7 +217,7 @@ Navigate to your test React Native application and run:
 yalc add @rebynx/rn
 
 # Install the dependencies
-npm install   # or yarn install / pnpm install
+npm install   # or yarn install
 ```
 
 If you modify Rebynx code again later, simply rebuild and run `yalc push` in the Rebynx package directories to automatically push changes to your application.

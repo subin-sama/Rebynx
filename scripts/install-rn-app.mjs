@@ -8,8 +8,8 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 function usage(exitCode = 0) {
   const stream = exitCode === 0 ? process.stdout : process.stderr;
   stream.write(`Usage:
-  pnpm install:rn-app -- /path/to/react-native-app
-  pnpm install:rn-app -- /path/to/react-native-app --dest rebynx
+  npm run install:rn-app -- /path/to/react-native-app
+  npm run install:rn-app -- /path/to/react-native-app --dest rebynx
 
 Copies @rebynx/core and @rebynx/rn into the app and adds local file dependencies.
 
@@ -144,10 +144,9 @@ async function exists(file) {
 }
 
 async function installCommand(appRoot) {
-  if (await exists(path.join(appRoot, 'pnpm-lock.yaml'))) return 'pnpm install';
-  if (await exists(path.join(appRoot, 'yarn.lock'))) return 'yarn install';
   if (await exists(path.join(appRoot, 'package-lock.json'))) return 'npm install';
-  return 'npm install # or yarn install / pnpm install';
+  if (await exists(path.join(appRoot, 'yarn.lock'))) return 'yarn install';
+  return 'npm install # or yarn install';
 }
 
 async function main() {

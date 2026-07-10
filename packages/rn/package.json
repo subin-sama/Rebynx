@@ -23,7 +23,7 @@
     "react-native": "*"
   },
   "dependencies": {
-    "@rebynx/core": "workspace:^"
+    "@rebynx/core": "^0.1.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",

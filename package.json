@@ -16,19 +16,22 @@
     "type": "git",
     "url": "https://github.com/bynx/rebynx.git"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "pnpm --filter @rebynx/core build && pnpm --filter @rebynx/server build",
-    "build:core": "pnpm --filter @rebynx/core build",
-    "build:server": "pnpm --filter @rebynx/server build",
-    "install:rn-app": "pnpm build:core && node scripts/install-rn-app.mjs",
-    "server": "pnpm --filter @rebynx/server start",
-    "server:dev": "pnpm --filter @rebynx/server dev",
-    "typecheck": "pnpm -r typecheck",
+    "build": "npm run build --workspace @rebynx/core && npm run build --workspace @rebynx/server",
+    "build:core": "npm run build --workspace @rebynx/core",
+    "build:server": "npm run build --workspace @rebynx/server",
+    "install:rn-app": "npm run build:core && node scripts/install-rn-app.mjs",
+    "server": "npm run start --workspace @rebynx/server",
+    "server:dev": "npm run dev --workspace @rebynx/server",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^4.1.9"
   },
-  "packageManager": "pnpm@9.0.0"
+  "packageManager": "npm@11.12.1"
 }
