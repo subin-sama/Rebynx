@@ -1,0 +1,235 @@
+/**
+ * Relay + static host — the reusable factory.
+ *
+ *   app(s)  ──hello:app──┐
+ *                        ├─►  relay  ──replay+live──►  browser(s)
+ *   browser ─hello:browser┘         ◄──commands───────
+ *
+ * Three jobs:
+ *  1. Broadcast events from app(s) to every connected browser.
+ *  2. Keep a ring buffer and replay it to a browser the moment it connects,
+ *     so a page refresh (or a reconnect after the app restarted) doesn't start
+ *     from an empty screen. This is the fix for the "logs vanish on reload" pain.
+ *  3. Forward commands (clear, inspect-at, …) from browser back to the app(s),
+ *     expose GET /open so a source link jumps to your editor, and serve the
+ *     /flows storage API (save/list/get/delete captured network flows).
+ *
+ * `createRelayServer()` returns a configured but NOT-yet-listening http.Server,
+ * so the entrypoint (index.ts) and tests can both drive it. Keeping this free of
+ * listen() side effects is what lets server.test.ts boot it on an ephemeral port.
+ */
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { exec } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer, WebSocket } from 'ws';
+import { deleteFlow, getFlow, listFlows, saveFlow } from './flows.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const RING_SIZE = 500;
+
+export const DEFAULT_PUBLIC_DIR = path.join(__dirname, '..', 'public');
+export const DEFAULT_FLOWS_DIR = process.env.DEVTOOLS_FLOWS_DIR ?? path.join(__dirname, '..', 'flows');
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+};
+
+function sendJson(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(body));
+}
+
+/** Read and JSON-parse a request body. Rejects on invalid JSON or oversized input. */
+function readJsonBody(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > 20_000_000) reject(new Error('body too large'));
+    });
+    req.on('end', () => {
+      try {
+        resolve(data ? JSON.parse(data) : undefined);
+      } catch {
+        reject(new Error('invalid json'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Flow storage REST API. Returns true when it owns the request, so the main
+ * handler can fall through to /open and the static client otherwise.
+ *
+ *   GET    /flows       -> FlowSummary[]
+ *   POST   /flows       -> save { name, notes?, calls } -> Flow
+ *   GET    /flows/:id   -> Flow
+ *   DELETE /flows/:id   -> { ok: true }
+ */
+async function handleFlows(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  flowsDir: string,
+): Promise<boolean> {
+  if (url.pathname === '/flows') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, await listFlows(flowsDir));
+      return true;
+    }
+    if (req.method === 'POST') {
+      let body: any;
+      try {
+        body = await readJsonBody(req);
+      } catch {
+        sendJson(res, 400, { error: 'invalid json' });
+        return true;
+      }
+      const name = typeof body?.name === 'string' ? body.name.trim() : '';
+      if (!name) {
+        sendJson(res, 400, { error: 'name required' });
+        return true;
+      }
+      const calls = Array.isArray(body?.calls) ? body.calls : [];
+      const notes = typeof body?.notes === 'string' ? body.notes : undefined;
+      const flow = await saveFlow(flowsDir, { name, notes, calls });
+      sendJson(res, 201, flow);
+      return true;
+    }
+    sendJson(res, 405, { error: 'method not allowed' });
+    return true;
+  }
+
+  const match = url.pathname.match(/^\/flows\/([^/]+)$/);
+  if (match) {
+    const id = decodeURIComponent(match[1]);
+    if (req.method === 'GET') {
+      const flow = await getFlow(flowsDir, id);
+      if (!flow) {
+        sendJson(res, 404, { error: 'not found' });
+        return true;
+      }
+      sendJson(res, 200, flow);
+      return true;
+    }
+    if (req.method === 'DELETE') {
+      const ok = await deleteFlow(flowsDir, id);
+      sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'not found' });
+      return true;
+    }
+    sendJson(res, 405, { error: 'method not allowed' });
+    return true;
+  }
+
+  return false;
+}
+
+export interface RelayOptions {
+  /** Where captured flows are stored. Defaults to DEFAULT_FLOWS_DIR. */
+  flowsDir?: string;
+  /** Where the browser client is served from. Defaults to DEFAULT_PUBLIC_DIR. */
+  publicDir?: string;
+}
+
+/** Build the relay http.Server (with WebSocket relay attached). Does not listen. */
+export function createRelayServer(opts: RelayOptions = {}): http.Server {
+  const flowsDir = opts.flowsDir ?? DEFAULT_FLOWS_DIR;
+  const publicDir = opts.publicDir ?? DEFAULT_PUBLIC_DIR;
+  fs.mkdirSync(flowsDir, { recursive: true });
+
+  const ring: unknown[] = [];
+  const apps = new Set<WebSocket>();
+  const browsers = new Set<WebSocket>();
+
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+
+    try {
+      if (await handleFlows(req, res, url, flowsDir)) return;
+    } catch {
+      sendJson(res, 500, { error: 'internal error' });
+      return;
+    }
+
+    // Jump-to-code: open a file at a line in VS Code (falls back gracefully).
+    if (url.pathname === '/open') {
+      const file = url.searchParams.get('file');
+      const line = url.searchParams.get('line') ?? '1';
+      if (file) {
+        // `code -g file:line` — swap for your editor (e.g. cursor, webstorm) if needed.
+        exec(`code -g "${file}:${line}"`, (err) => {
+          res.writeHead(err ? 500 : 200, { 'content-type': 'text/plain' });
+          res.end(err ? `could not open editor: ${err.message}` : 'ok');
+        });
+      } else {
+        res.writeHead(400);
+        res.end('missing file');
+      }
+      return;
+    }
+
+    // Static client.
+    const rel = url.pathname === '/' ? '/index.html' : url.pathname;
+    const filePath = path.join(publicDir, rel);
+    if (!filePath.startsWith(publicDir) || !fs.existsSync(filePath)) {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    res.writeHead(200, { 'content-type': MIME[path.extname(filePath)] ?? 'application/octet-stream' });
+    fs.createReadStream(filePath).pipe(res);
+  });
+
+  const wss = new WebSocketServer({ server });
+
+  wss.on('connection', (ws) => {
+    ws.on('message', (data) => {
+      const raw = data.toString();
+      let msg: any;
+      try {
+        msg = JSON.parse(raw);
+      } catch {
+        return;
+      }
+
+      switch (msg.kind) {
+        case 'hello': {
+          if (msg.role === 'app') {
+            apps.add(ws);
+          } else {
+            browsers.add(ws);
+            // Replay history to the freshly-connected browser.
+            for (const event of ring) {
+              if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ kind: 'event', event }));
+            }
+          }
+          break;
+        }
+        case 'event': {
+          ring.push(msg.event);
+          if (ring.length > RING_SIZE) ring.shift();
+          for (const b of browsers) if (b.readyState === b.OPEN) b.send(raw);
+          break;
+        }
+        case 'command': {
+          if (msg.command?.type === 'clear') ring.length = 0;
+          for (const a of apps) if (a.readyState === a.OPEN) a.send(raw);
+          break;
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      apps.delete(ws);
+      browsers.delete(ws);
+    });
+  });
+
+  return server;
+}

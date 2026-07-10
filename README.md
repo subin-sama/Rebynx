@@ -106,6 +106,31 @@ file opens in your editor (jump-to-code). Configurable port via `DEVTOOLS_PORT`.
 > **Android emulator** can't reach `localhost` — use `ws://10.0.2.2:9090`.
 > **Physical device** — use your machine's LAN IP.
 
+## Save a network flow
+
+Drive a user flow on the emulator, then snapshot every API call it made — URL,
+request and response — as a reusable **flow** saved on the relay.
+
+1. In the browser client, hit **Clear** to start from a clean slate.
+2. Play the flow in your app; requests stream into the **Network** tab.
+3. Click **Save flow** and name it. The relay writes
+   `packages/server/flows/<name>.json`.
+4. Open the **Flows** tab to browse saved flows and expand each call's
+   request/response.
+
+The relay exposes flows as a small REST API:
+
+| Method | Path | Does |
+| --- | --- | --- |
+| `GET` | `/flows` | list saved flows |
+| `POST` | `/flows` | save `{ name, notes?, calls }` |
+| `GET` | `/flows/:id` | fetch one flow |
+| `DELETE` | `/flows/:id` | delete one |
+
+Storage dir is overridable via `DEVTOOLS_FLOWS_DIR`. The saved format
+(`{ method, url, request, response }` per call, in order) is built to also drive
+future **replay** and **mock** modes.
+
 ## What it fixes vs the official RN DevTools
 
 | Pain | Rebynx |
@@ -117,6 +142,7 @@ file opens in your editor (jump-to-code). Configurable port via `DEVTOOLS_PORT`.
 | Network panel was Expo-only / unstable | `XMLHttpRequest.prototype` hook — catches fetch + axios, works in the browser too |
 | Separate window only | runs **in-app** as well, on-device, no server |
 | Logs vanish on reload | relay replays its ring buffer to the browser on connect |
+| No record of what APIs a flow calls | **Save flow** snapshots the Network tab to a reusable JSON file (URL + request + response) |
 
 ## Packages
 
@@ -139,6 +165,10 @@ npm run build
 
 # Start the WebSocket relay server (defaults to port 9090)
 npm run server
+
+# …or watch mode — auto-restarts on source changes (recommended while hacking
+# on the server, so a rebuilt route like /flows is picked up without a manual restart)
+npm run server:dev
 ```
 
 ### 2. Run Unit Tests

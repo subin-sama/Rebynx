@@ -115,6 +115,14 @@
         color: #c8cdd6;
       }
       .empty { color: var(--muted); text-align: center; padding: 48px; }
+      .flash { color: var(--green); margin-left: 2px; opacity: 0; transition: opacity 0.2s; white-space: nowrap; }
+      .flash.on { opacity: 1; }
+      .flow-row { cursor: pointer; }
+      .flow-name { color: var(--text); font-weight: 600; flex-shrink: 0; }
+      .flow-del { padding: 2px 8px; font-size: 11px; }
+      .flow-head { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--border); }
+      .flow-back { padding: 3px 8px; }
+      .seq { color: var(--muted); flex-shrink: 0; }
     </style>
   </head>
   <body>
@@ -122,7 +130,9 @@
       <span class="title">Rebynx</span>
       <span class="conn"><span class="dot" id="dot"></span><span id="conn-text">connecting…</span></span>
       <input id="filter" placeholder="filter…" />
+      <button id="save-flow">Save flow</button>
       <button id="clear">Clear</button>
+      <span class="flash" id="flash"></span>
     </header>
     <div class="tabs" id="tabs"></div>
     <main id="main"></main>
@@ -139,6 +149,10 @@
       let filter = '';
       const events = [];
       const netIndex = new Map(); // reqId -> merged request row
+
+      // Saved flows (server-backed, not event-driven).
+      let flowList = [];       // FlowSummary[] for the list view
+      let flowDetail = null;   // opened Flow, or null for the list
 
       const $ = (id) => document.getElementById(id);
       const time = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(ts % 1000).padStart(3, '0');
@@ -171,10 +185,12 @@
       }
 
       function renderTabs() {
-        $('tabs').innerHTML = PLUGINS.map((p) => {
+        const pluginTabs = PLUGINS.map((p) => {
           const n = events.filter((e) => p.accepts(e)).length;
           return `<div class="tab ${p.id === active ? 'active' : ''}" data-tab="${p.id}">${p.label} <span class="count">${n}</span></div>`;
         }).join('');
+        const flowsTab = `<div class="tab ${active === 'flows' ? 'active' : ''}" data-tab="flows">Flows <span class="count">${flowList.length}</span></div>`;
+        $('tabs').innerHTML = pluginTabs + flowsTab;
       }
 
       function rowLog(e) {
@@ -228,6 +244,7 @@
 
       function render() {
         renderTabs();
+        if (active === 'flows') { renderFlows(); return; }
         const plugin = PLUGINS.find((p) => p.id === active);
         const list = events.filter((e) => plugin.accepts(e) && matches(e));
         if (!list.length) {
@@ -238,17 +255,126 @@
         $('main').innerHTML = list.map(renderer).join('');
       }
 
+      // ---- flows ----
+      function flash(msg) {
+        const el = $('flash');
+        el.textContent = msg;
+        el.classList.add('on');
+        clearTimeout(flash._t);
+        flash._t = setTimeout(() => el.classList.remove('on'), 2500);
+      }
+
+      // Snapshot the current network rows (in order) into the saved-flow shape.
+      function buildFlowCalls() {
+        return events.filter((e) => e.type === 'network').map((e, i) => ({
+          seq: i + 1,
+          method: e.method, url: e.url, status: e.status, ok: e.ok, duration: e.duration,
+          request: { headers: e.reqHeaders, body: e.reqBody },
+          response: { headers: e.resHeaders, body: e.resBody },
+        }));
+      }
+
+      async function saveFlow() {
+        const calls = buildFlowCalls();
+        if (!calls.length) { alert('No network calls to save. Drive a flow first (Clear, then play).'); return; }
+        const name = prompt(`Save ${calls.length} network call(s) as a flow named:`);
+        if (!name || !name.trim()) return;
+        try {
+          const res = await fetch('/flows', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ name: name.trim(), calls }),
+          });
+          if (res.status === 404) {
+            alert('Save endpoint not found (404). The relay server is running an older build without /flows — restart it (e.g. `npm run server:dev`) and try again.');
+            return;
+          }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const flow = await res.json();
+          flash(`Saved “${flow.name}” · ${calls.length} calls`);
+          if (active === 'flows') loadFlows();
+        } catch (err) {
+          alert('Could not save flow: ' + err.message);
+        }
+      }
+
+      async function loadFlows() {
+        try { flowList = await (await fetch('/flows')).json(); }
+        catch { flowList = []; }
+        render();
+      }
+
+      async function openFlow(id) {
+        try { flowDetail = await (await fetch('/flows/' + encodeURIComponent(id))).json(); }
+        catch { flowDetail = null; }
+        render();
+      }
+
+      async function removeFlow(id) {
+        if (!confirm('Delete this flow?')) return;
+        try { await fetch('/flows/' + encodeURIComponent(id), { method: 'DELETE' }); } catch {}
+        if (flowDetail && flowDetail.id === id) flowDetail = null;
+        loadFlows();
+      }
+
+      function renderFlows() {
+        if (flowDetail) { renderFlowDetail(); return; }
+        if (!flowList.length) {
+          $('main').innerHTML = `<div class="empty">no saved flows yet — Clear, drive a flow, then “Save flow”</div>`;
+          return;
+        }
+        $('main').innerHTML = flowList.map((f) => `
+          <div class="row flow-row" data-id="${esc(f.id)}">
+            <span class="ts">${time(f.createdAt)}</span>
+            <span class="flow-name">${esc(f.name)}</span>
+            <span class="url"><span class="count">${f.count} call${f.count === 1 ? '' : 's'}</span></span>
+            <button class="flow-del" data-id="${esc(f.id)}">Delete</button>
+          </div>`).join('');
+      }
+
+      function renderFlowDetail() {
+        const f = flowDetail;
+        const calls = (f.calls || []);
+        const body = calls.map((c) => {
+          const statusCls = c.ok ? 'ok' : (c.status ? 'err' : 'pending');
+          return `<div class="row">
+            <span class="seq">#${c.seq}</span>
+            <span class="method">${esc(c.method || '')}</span>
+            <span class="status ${statusCls}">${c.status != null ? c.status : '···'}</span>
+            <span class="url">${esc(c.url || '')}
+              <details><summary>details${c.duration != null ? ' · ' + c.duration + 'ms' : ''}</summary><pre>${pretty({ request: c.request, response: c.response })}</pre></details>
+            </span>
+          </div>`;
+        }).join('');
+        $('main').innerHTML = `
+          <div class="flow-head">
+            <button class="flow-back">← Flows</button>
+            <span class="flow-name">${esc(f.name)}</span>
+            <span class="count">${calls.length} call${calls.length === 1 ? '' : 's'} · ${time(f.createdAt)}</span>
+          </div>${body || '<div class="empty">no calls in this flow</div>'}`;
+      }
+
       // ---- interactions ----
       $('tabs').addEventListener('click', (ev) => {
         const tab = ev.target.closest('.tab');
-        if (tab) { active = tab.dataset.tab; render(); }
+        if (!tab) return;
+        active = tab.dataset.tab;
+        if (active === 'flows') { flowDetail = null; loadFlows(); }
+        else render();
       });
+      $('save-flow').addEventListener('click', saveFlow);
       $('filter').addEventListener('input', (ev) => { filter = ev.target.value.toLowerCase(); render(); });
       $('clear').addEventListener('click', () => {
         events.length = 0; netIndex.clear(); render();
         if (ws && ws.readyState === 1) ws.send(JSON.stringify({ kind: 'command', command: { type: 'clear' } }));
       });
       $('main').addEventListener('click', (ev) => {
+        const del = ev.target.closest('.flow-del');
+        if (del) { ev.stopPropagation(); removeFlow(del.dataset.id); return; }
+        const back = ev.target.closest('.flow-back');
+        if (back) { flowDetail = null; render(); return; }
+        const frow = ev.target.closest('.flow-row');
+        if (frow) { openFlow(frow.dataset.id); return; }
         const s = ev.target.closest('.src');
         if (s) fetch(`/open?file=${encodeURIComponent(s.dataset.file)}&line=${encodeURIComponent(s.dataset.line)}`).catch(() => {});
       });

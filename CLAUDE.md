@@ -23,6 +23,16 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
   buffer to a browser on connect** (fixes lost-logs-on-reload), forwards commands
   browser→app, and exposes `GET /open?file=&line=` for jump-to-code. Serves the
   browser client from `public/index.html` (single self-contained file, no build).
+  - `server.ts` — `createRelayServer({ flowsDir?, publicDir? })` builds the
+    configured http.Server (routes + WebSocket relay) but **does not listen**, so
+    `server.test.ts` can boot it on an ephemeral port. `index.ts` is the thin
+    entrypoint that just `listen()`s (kept side-effecting so `bin/cli.mjs`'s
+    `import('../dist/index.js')` still auto-starts).
+  - `flows.ts` — **save-network-as-flow** storage: snapshot the current Network
+    tab and persist it as `flows/<id>.json` (url + request + response per call, in
+    order). REST: `GET/POST /flows`, `GET/DELETE /flows/:id`. `slugify`/`safeId`
+    keep ids to `[a-z0-9-]` (no path traversal). Dir overridable via
+    `DEVTOOLS_FLOWS_DIR`. Format is designed to also feed future replay + mock.
 - **`packages/rn`** — `initDevTools()` wiring + `<DevToolsOverlay/>` (draggable
   bubble → tabbed mini panel). Reads from `memorySink`.
 
@@ -41,17 +51,17 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
 ## Run, Test & Link Locally
 
 ```bash
-pnpm install
-pnpm build               # compile the packages (core + server)
-pnpm server              # start relay server (http://localhost:9090)
-pnpm test                # run vitest test suite
-pnpm typecheck           # run typescript compiler checks
+npm install
+npm run build            # compile the packages (core + server)
+npm run server           # start relay server (http://localhost:9090)
+npm test                 # run vitest test suite
+npm run typecheck        # run typescript compiler checks
 ```
 
 For testing in local React Native apps (solves Metro symlink issues):
 ```bash
 npm install -g yalc
-pnpm build
+npm run build
 (cd packages/core && yalc publish)
 (cd packages/rn && yalc publish)
 # Then run `yalc add @rebynx/rn` in your target React Native app

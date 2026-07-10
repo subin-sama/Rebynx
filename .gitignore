@@ -32,3 +32,6 @@ yalc.lock
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Saved network flows (runtime data)
+packages/server/flows/

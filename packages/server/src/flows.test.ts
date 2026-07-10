@@ -1,0 +1,146 @@
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  deleteFlow,
+  getFlow,
+  listFlows,
+  safeId,
+  saveFlow,
+  slugify,
+  type FlowCall,
+} from './flows.js';
+
+let dir: string;
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebynx-flows-'));
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+const call = (seq: number): FlowCall => ({
+  seq,
+  method: 'GET',
+  url: `https://api.example.com/step/${seq}`,
+  status: 200,
+  ok: true,
+  duration: 10,
+  request: { headers: { 'x-req': '1' }, body: { a: seq } },
+  response: { headers: { 'content-type': 'application/json' }, body: { ok: true } },
+});
+
+describe('slugify', () => {
+  test('lowercases and dashes spaces', () => {
+    expect(slugify('Checkout Flow')).toBe('checkout-flow');
+  });
+
+  test('collapses runs and trims dashes', () => {
+    expect(slugify('  Add   to  Cart!! ')).toBe('add-to-cart');
+  });
+
+  test('replaces slashes so a name can never escape the dir', () => {
+    expect(slugify('a/b')).toBe('a-b');
+  });
+
+  test('falls back to "flow" when nothing slug-able remains', () => {
+    expect(slugify('   ')).toBe('flow');
+    expect(slugify('!!!')).toBe('flow');
+    expect(slugify('ทดสอบ')).toBe('flow');
+  });
+});
+
+describe('safeId', () => {
+  test('accepts a clean slug', () => {
+    expect(safeId('checkout-flow-2')).toBe('checkout-flow-2');
+  });
+
+  test('rejects traversal, slashes and dots', () => {
+    expect(safeId('../etc')).toBeNull();
+    expect(safeId('a/b')).toBeNull();
+    expect(safeId('a.b')).toBeNull();
+    expect(safeId('')).toBeNull();
+    expect(safeId('UPPER')).toBeNull();
+  });
+});
+
+describe('saveFlow', () => {
+  test('writes a file, stamps createdAt, returns the slugged id', async () => {
+    const flow = await saveFlow(dir, { name: 'Checkout Flow', calls: [call(1)] });
+
+    expect(flow.id).toBe('checkout-flow');
+    expect(flow.name).toBe('Checkout Flow');
+    expect(typeof flow.createdAt).toBe('number');
+    expect(flow.createdAt).toBeGreaterThan(0);
+    expect(fs.existsSync(path.join(dir, 'checkout-flow.json'))).toBe(true);
+  });
+
+  test('never overwrites a duplicate name — suffixes the id instead', async () => {
+    const a = await saveFlow(dir, { name: 'Login', calls: [call(1)] });
+    const b = await saveFlow(dir, { name: 'Login', calls: [call(2)] });
+    const c = await saveFlow(dir, { name: 'Login', calls: [call(3)] });
+
+    expect(a.id).toBe('login');
+    expect(b.id).toBe('login-2');
+    expect(c.id).toBe('login-3');
+
+    // original is untouched
+    const first = await getFlow(dir, 'login');
+    expect(first?.calls[0].url).toBe('https://api.example.com/step/1');
+  });
+});
+
+describe('listFlows', () => {
+  test('returns summaries without bodies, newest first', async () => {
+    await saveFlow(dir, { name: 'First', calls: [call(1)], createdAt: 1000 });
+    await saveFlow(dir, { name: 'Second', calls: [call(1), call(2)], createdAt: 2000 });
+
+    const list = await listFlows(dir);
+
+    expect(list.map((f) => f.id)).toEqual(['second', 'first']);
+    expect(list[0]).toEqual({ id: 'second', name: 'Second', createdAt: 2000, count: 2 });
+    // summaries must not leak call bodies
+    expect(list[0]).not.toHaveProperty('calls');
+  });
+
+  test('is empty for a fresh dir and skips malformed files', async () => {
+    expect(await listFlows(dir)).toEqual([]);
+
+    await saveFlow(dir, { name: 'Good', calls: [call(1)], createdAt: 1000 });
+    fs.writeFileSync(path.join(dir, 'broken.json'), '{ not json');
+
+    const list = await listFlows(dir);
+    expect(list.map((f) => f.id)).toEqual(['good']);
+  });
+});
+
+describe('getFlow', () => {
+  test('round-trips a saved flow', async () => {
+    await saveFlow(dir, { name: 'Cart', notes: 'hi', calls: [call(1), call(2)] });
+
+    const flow = await getFlow(dir, 'cart');
+    expect(flow?.name).toBe('Cart');
+    expect(flow?.notes).toBe('hi');
+    expect(flow?.calls).toHaveLength(2);
+    expect(flow?.calls[1].response.body).toEqual({ ok: true });
+  });
+
+  test('returns null for unknown and for unsafe ids', async () => {
+    expect(await getFlow(dir, 'nope')).toBeNull();
+    expect(await getFlow(dir, '../secrets')).toBeNull();
+  });
+});
+
+describe('deleteFlow', () => {
+  test('removes the file and reports whether it existed', async () => {
+    await saveFlow(dir, { name: 'Temp', calls: [call(1)] });
+
+    expect(await deleteFlow(dir, 'temp')).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'temp.json'))).toBe(false);
+    expect(await deleteFlow(dir, 'temp')).toBe(false);
+    expect(await deleteFlow(dir, '../etc')).toBe(false);
+  });
+});
