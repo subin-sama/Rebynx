@@ -117,6 +117,9 @@ request and response — as a reusable **flow** saved on the relay.
    `packages/server/flows/<name>.json`.
 4. Open the **Flows** tab to browse saved flows and expand each call's
    request/response.
+5. **Export** a saved flow (button beside Delete in the Flows tab) to download its
+   JSON — e.g. to import into `api-ui-mapper`, where each captured call becomes a
+   real-response mock override.
 
 The relay exposes flows as a small REST API:
 

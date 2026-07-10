@@ -291,6 +291,28 @@ export function createApp(doc = globalThis.document) {
     loadFlows();
   }
 
+  // Download the flow JSON (native format) so it can be imported elsewhere,
+  // e.g. into api-ui-mapper as mock overrides.
+  async function exportFlow(id) {
+    try {
+      const res = await fetch('/flows/' + encodeURIComponent(id));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const flow = await res.json();
+      const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = doc.createElement('a');
+      a.href = url;
+      a.download = id + '.json';
+      doc.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flash(`Exported ${id}.json`);
+    } catch (err) {
+      alert('Could not export flow: ' + err.message);
+    }
+  }
+
   function renderFlows() {
     if (flowDetail) return renderFlowDetail();
     const el = main();
@@ -303,6 +325,7 @@ export function createApp(doc = globalThis.document) {
         <span class="ts">${time(f.createdAt)}</span>
         <span class="flow-name">${esc(f.name)}</span>
         <span class="url"><span class="count">${f.count} call${f.count === 1 ? '' : 's'}</span></span>
+        <button class="flow-export" data-id="${esc(f.id)}">Export</button>
         <button class="flow-del" data-id="${esc(f.id)}">Delete</button>
       </div>`).join('');
   }
@@ -360,6 +383,8 @@ export function createApp(doc = globalThis.document) {
     main().addEventListener('click', (ev) => {
       const copyBtn = ev.target.closest('.copy-btn');
       if (copyBtn) { ev.stopPropagation(); copyFrom(copyBtn); return; }
+      const exp = ev.target.closest('.flow-export');
+      if (exp) { ev.stopPropagation(); exportFlow(exp.dataset.id); return; }
       const del = ev.target.closest('.flow-del');
       if (del) { ev.stopPropagation(); removeFlow(del.dataset.id); return; }
       const back = ev.target.closest('.flow-back');
