@@ -22,7 +22,12 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
 - **`packages/server`** — Node relay. Broadcasts app→browser, **replays the ring
   buffer to a browser on connect** (fixes lost-logs-on-reload), forwards commands
   browser→app, and exposes `GET /open?file=&line=` for jump-to-code. Serves the
-  browser client from `public/index.html` (single self-contained file, no build).
+  browser client from `public/` (no build): `index.html` (markup + styles) loads
+  `app.js` as an ES module — `createApp(doc)` has zero import side effects so
+  `app.test.js` can drive it under happy-dom. The client renders **incrementally**
+  (append/patch one row per event) rather than rebuilding `#main`, so an open
+  `<details>` payload or a text selection survives the next incoming event; JSON
+  panels are syntax-highlighted and copyable (`<pre>` text is the raw JSON).
   - `server.ts` — `createRelayServer({ flowsDir?, publicDir? })` builds the
     configured http.Server (routes + WebSocket relay) but **does not listen**, so
     `server.test.ts` can boot it on an ephemeral port. `index.ts` is the thin
