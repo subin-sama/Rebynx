@@ -282,10 +282,25 @@ export const createReduxMiddleware =
   (next: (action: unknown) => unknown) =>
   (action: unknown) => {
     const result = next(action);
+    // Capture what was dispatched, not just its type: the FSA `payload` when
+    // that's the only non-type field, else the whole action minus `type` (covers
+    // thunk-ish actions that spread args at the top level). Omit for bare actions.
+    const act = action && typeof action === 'object' ? (action as Record<string, unknown>) : null;
+    let payload: unknown;
+    if (act) {
+      const keys = Object.keys(act).filter((k) => k !== 'type');
+      if (keys.length === 1 && keys[0] === 'payload') payload = sanitize(act.payload);
+      else if (keys.length) {
+        const rest: Record<string, unknown> = {};
+        for (const k of keys) rest[k] = act[k];
+        payload = sanitize(rest);
+      }
+    }
     hub.emit({
       type: 'state',
       store: name,
-      action: (action as { type?: string } | null)?.type,
+      action: act?.type as string | undefined,
+      payload,
       state: sanitize(store.getState()),
     });
     return result;

@@ -189,6 +189,31 @@ describe('collectors', () => {
       expect(emittedEvents[0].action).toBe('INCREMENT');
       expect(emittedEvents[0].state).toEqual({ count: 1 });
     });
+
+    it('should capture the FSA payload alongside the action type', () => {
+      const store = { getState: () => ({}) };
+      const middleware = createReduxMiddleware(hub, 'redux');
+      middleware(store)(vi.fn())({ type: 'ADD_ITEM', payload: { sku: 'A1', qty: 2 } });
+
+      expect(emittedEvents[0].action).toBe('ADD_ITEM');
+      expect(emittedEvents[0].payload).toEqual({ sku: 'A1', qty: 2 });
+    });
+
+    it('should capture non-payload action fields as the payload object', () => {
+      const store = { getState: () => ({}) };
+      const middleware = createReduxMiddleware(hub, 'redux');
+      middleware(store)(vi.fn())({ type: 'NAV', screen: 'Home', params: { id: 1 } });
+
+      expect(emittedEvents[0].payload).toEqual({ screen: 'Home', params: { id: 1 } });
+    });
+
+    it('should omit payload for a bare action (type only)', () => {
+      const store = { getState: () => ({}) };
+      const middleware = createReduxMiddleware(hub, 'redux');
+      middleware(store)(vi.fn())({ type: 'RESET' });
+
+      expect(emittedEvents[0].payload).toBeUndefined();
+    });
   });
 
   describe('trackZustand', () => {

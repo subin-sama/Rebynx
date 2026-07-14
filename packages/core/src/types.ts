@@ -49,6 +49,8 @@ export interface StateEvent extends Base {
   store: string;
   /** action type for redux-like stores */
   action?: string;
+  /** sanitised payload / non-type fields of the dispatched action (redux) */
+  payload?: unknown;
   /** sanitised full snapshot */
   state: unknown;
 }
