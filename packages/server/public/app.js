@@ -276,6 +276,7 @@ export function createApp(doc = globalThis.document) {
   const netNodes = new Map(); // reqId -> row element (DOM), for in-place updates
   let flowList = [];
   let flowDetail = null;
+  let mockState = { active: false, port: 9091, url: '', flows: [], calls: [], endpoints: [] };
   let appsConnected = 0;      // RN apps currently connected to the relay
   let lanInfo = { lanIp: null };
   let stateAdapter = 'redux'; // which state-manager snippet the Setup tab shows
@@ -577,12 +578,14 @@ export function createApp(doc = globalThis.document) {
   async function loadFlows() {
     try { flowList = await (await fetch('/flows')).json(); }
     catch { flowList = []; }
+    await loadMock();
     fullRender();
   }
 
   async function openFlow(id) {
     try { flowDetail = await (await fetch('/flows/' + encodeURIComponent(id))).json(); }
     catch { flowDetail = null; }
+    await loadMock();
     fullRender();
   }
 
@@ -615,18 +618,56 @@ export function createApp(doc = globalThis.document) {
     }
   }
 
+  // ---- mock server (replay saved flows as a live API) ----
+  async function loadMock() {
+    try { mockState = await (await fetch('/mock')).json(); } catch { /* keep last */ }
+  }
+
+  async function applyMock(res) {
+    if (res && res.ok) mockState = await res.json();
+    if (active === 'flows') fullRender();
+  }
+
+  async function toggleFlowMock(id) {
+    const on = mockState.flows.includes(id);
+    await applyMock(await fetch('/mock/flow/' + encodeURIComponent(id), { method: on ? 'DELETE' : 'POST' }));
+  }
+
+  async function toggleCallMock(flowId, seq) {
+    const on = mockState.calls.includes(flowId + '#' + seq);
+    await applyMock(await fetch('/mock/call/' + encodeURIComponent(flowId) + '/' + encodeURIComponent(seq), { method: on ? 'DELETE' : 'POST' }));
+  }
+
+  async function stopMock() {
+    await applyMock(await fetch('/mock', { method: 'DELETE' }));
+  }
+
+  function mockBanner() {
+    if (!mockState.active) return '';
+    const n = mockState.endpoints.length;
+    return `<div class="mock-banner">
+      <div class="mock-banner-row">
+        <span class="mock-dot"></span>
+        <span>Mock API live · ${n} endpoint${n === 1 ? '' : 's'}</span>
+        <button class="mock-stop">Stop</button>
+      </div>
+      ${codeBlock('point your app’s baseURL here', mockState.url)}
+    </div>`;
+  }
+
   function renderFlows() {
     if (flowDetail) return renderFlowDetail();
     const el = main();
     if (!flowList.length) {
-      el.innerHTML = `<div class="empty">no saved flows yet — Clear, drive a flow, then “Save flow”</div>`;
+      el.innerHTML = mockBanner() + `<div class="empty">no saved flows yet — Clear, drive a flow, then “Save flow”</div>`;
       return;
     }
-    el.innerHTML = flowList.map((f) => `
+    el.innerHTML = mockBanner() + flowList.map((f) => `
       <div class="row flow-row" data-id="${esc(f.id)}">
         <span class="ts">${time(f.createdAt)}</span>
         <span class="flow-name">${esc(f.name)}</span>
         <span class="url"><span class="count">${f.count} call${f.count === 1 ? '' : 's'}</span></span>
+        <button class="mock-flow ${mockState.flows.includes(f.id) ? 'on' : ''}" data-id="${esc(f.id)}">${mockState.flows.includes(f.id) ? '✓ Mocking' : '▶ Serve as mock'}</button>
         <button class="flow-export" data-id="${esc(f.id)}">Export</button>
         <button class="flow-del" data-id="${esc(f.id)}">Delete</button>
       </div>`).join('');
@@ -637,6 +678,7 @@ export function createApp(doc = globalThis.document) {
     const calls = f.calls || [];
     const body = calls.map((c) => {
       const statusCls = c.ok ? 'ok' : c.status ? 'err' : 'pending';
+      const mocked = mockState.calls.includes(f.id + '#' + c.seq);
       return `<div class="row">
         <span class="seq">#${c.seq}</span>
         <span class="method">${esc(c.method || '')}</span>
@@ -647,6 +689,7 @@ export function createApp(doc = globalThis.document) {
             ${jsonBlock('Response' + (c.status != null ? ' · ' + c.status : ''), c.response)}
           </details>
         </span>
+        <button class="mock-call ${mocked ? 'on' : ''}" data-flow="${esc(f.id)}" data-seq="${esc(c.seq)}">${mocked ? '✓ Mocked' : 'Mock'}</button>
       </div>`;
     }).join('');
     main().innerHTML = `
@@ -654,7 +697,7 @@ export function createApp(doc = globalThis.document) {
         <button class="flow-back">← Flows</button>
         <span class="flow-name">${esc(f.name)}</span>
         <span class="count">${calls.length} call${calls.length === 1 ? '' : 's'} · ${time(f.createdAt)}</span>
-      </div>${body || '<div class="empty">no calls in this flow</div>'}`;
+      </div>${mockBanner()}${body || '<div class="empty">no calls in this flow</div>'}`;
   }
 
   function copyFrom(btn) {
@@ -779,6 +822,11 @@ export function createApp(doc = globalThis.document) {
       if (stateOpt) { ev.stopPropagation(); selectStateAdapter(stateOpt.dataset.adapter); return; }
       const copyBtn = ev.target.closest('.copy-btn');
       if (copyBtn) { ev.stopPropagation(); copyFrom(copyBtn); return; }
+      const mflow = ev.target.closest('.mock-flow');
+      if (mflow) { ev.stopPropagation(); toggleFlowMock(mflow.dataset.id); return; }
+      const mcall = ev.target.closest('.mock-call');
+      if (mcall) { ev.stopPropagation(); toggleCallMock(mcall.dataset.flow, mcall.dataset.seq); return; }
+      if (ev.target.closest('.mock-stop')) { ev.stopPropagation(); stopMock(); return; }
       const exp = ev.target.closest('.flow-export');
       if (exp) { ev.stopPropagation(); exportFlow(exp.dataset.id); return; }
       const del = ev.target.closest('.flow-del');
@@ -832,6 +880,12 @@ export function createApp(doc = globalThis.document) {
     set flowList(v) { flowList = v; },
     get flowDetail() { return flowDetail; },
     set flowDetail(v) { flowDetail = v; },
+    get mockState() { return mockState; },
+    set mockState(v) { mockState = v; },
+    loadMock,
+    toggleFlowMock,
+    toggleCallMock,
+    stopMock,
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
     get statePaused() { return statePaused; },

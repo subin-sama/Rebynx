@@ -380,6 +380,58 @@ describe('State — action payload', () => {
   });
 });
 
+describe('Flows — mock server', () => {
+  beforeEach(setupDom);
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const stubFetch = (map) => {
+    globalThis.fetch = (url, opts) => {
+      const method = (opts && opts.method) || 'GET';
+      const body = map[`${method} ${url}`] ?? map[url] ?? {};
+      return Promise.resolve({ ok: true, status: 200, json: async () => body });
+    };
+  };
+  const activeStatus = (over = {}) => ({
+    active: true, port: 9091, url: 'http://192.168.1.9:9091',
+    flows: [], calls: [], endpoints: [{ method: 'GET', path: '/x/profile', count: 1 }], ...over,
+  });
+
+  test('the Flows list renders a Serve-as-mock toggle per flow', async () => {
+    stubFetch({ '/flows': [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }], '/mock': { active: false, flows: [], calls: [], endpoints: [] } });
+    const app = createApp(document);
+    app.setActive('flows');
+    await flush();
+    expect(document.querySelector('#main .mock-flow[data-id="login"]')).toBeTruthy();
+  });
+
+  test('serving a flow shows the banner (with URL) and highlights the row', async () => {
+    stubFetch({
+      '/flows': [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }],
+      '/mock': { active: false, flows: [], calls: [], endpoints: [] },
+      'POST /mock/flow/login': activeStatus({ flows: ['login'] }),
+    });
+    const app = createApp(document);
+    app.setActive('flows');
+    await flush();
+    await app.toggleFlowMock('login');
+    expect(document.querySelector('#main .mock-banner')).toBeTruthy();
+    expect(document.querySelector('#main .mock-banner').textContent).toContain('192.168.1.9:9091');
+    expect(document.querySelector('#main .mock-flow.on[data-id="login"]')).toBeTruthy();
+  });
+
+  test('stopMock clears the banner', async () => {
+    stubFetch({ 'DELETE /mock': { active: false, flows: [], calls: [], endpoints: [] } });
+    const app = createApp(document);
+    app.mockState = activeStatus({ flows: ['login'] });
+    app.flowList = [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }];
+    app.setActive('logs');       // avoid loadFlows fetch; render logs then flip
+    app.setActive('flows');
+    await flush();
+    await app.stopMock();
+    expect(document.querySelector('#main .mock-banner')).toBeNull();
+  });
+});
+
 describe('bounded history (perf)', () => {
   beforeEach(setupDom);
 
