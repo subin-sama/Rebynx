@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { pathOf, routeKey, buildRoutes, matchCall } from './mock.js';
+import type { AddressInfo } from 'node:net';
+import { pathOf, routeKey, buildRoutes, matchCall, createMockServer } from './mock.js';
 import type { FlowCall } from './flows.js';
 
 const call = (seq: number, method: string, url: string, body: unknown): FlowCall => ({
@@ -43,5 +44,62 @@ describe('buildRoutes + matchCall', () => {
   test('routeKey uppercases method and defaults to GET', () => {
     expect(routeKey('get', '/a')).toBe('GET /a');
     expect(routeKey(undefined, '/a')).toBe('GET /a');
+  });
+});
+
+async function boot(getRoutes: () => import('./mock.js').RouteMap) {
+  const server = createMockServer(getRoutes);
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as AddressInfo;
+  return { server, base: `http://127.0.0.1:${port}` };
+}
+
+describe('createMockServer', () => {
+  test('serves the saved response, then the next in sequence', async () => {
+    const routes = buildRoutes([
+      call(1, 'GET', '/poll', { step: 1 }),
+      call(2, 'GET', '/poll', { step: 2 }),
+    ]);
+    const { server, base } = await boot(() => routes);
+    try {
+      expect(await (await fetch(`${base}/poll`)).json()).toEqual({ step: 1 });
+      expect(await (await fetch(`${base}/poll`)).json()).toEqual({ step: 2 });
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('404 with a JSON hint when nothing matches', async () => {
+    const { server, base } = await boot(() => ({}));
+    try {
+      const res = await fetch(`${base}/missing`);
+      expect(res.status).toBe(404);
+      expect((await res.json()).method).toBe('GET');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('OPTIONS preflight is 204 with permissive CORS', async () => {
+    const { server, base } = await boot(() => ({}));
+    try {
+      const res = await fetch(`${base}/x`, { method: 'OPTIONS' });
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('reads the route map live via the callback (no restart)', async () => {
+    let routes = buildRoutes([]);
+    const { server, base } = await boot(() => routes);
+    try {
+      expect((await fetch(`${base}/late`)).status).toBe(404);
+      routes = buildRoutes([call(1, 'GET', '/late', { ok: true })]);
+      expect(await (await fetch(`${base}/late`)).json()).toEqual({ ok: true });
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
   });
 });

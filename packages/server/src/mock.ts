@@ -46,3 +46,49 @@ export function matchCall(
   cursor.set(key, i + 1);
   return list[Math.min(i, list.length - 1)];
 }
+
+const CORS: Record<string, string> = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': '*',
+  'access-control-allow-headers': '*',
+};
+
+const STRIP = new Set(['content-length', 'content-encoding', 'transfer-encoding']);
+
+/**
+ * An http.Server that answers requests from `getRoutes()` (read live, so the
+ * registry can change without a restart). One cursor per server instance drives
+ * the replay sequence.
+ */
+export function createMockServer(getRoutes: () => RouteMap): http.Server {
+  const cursor = new Map<string, number>();
+  return http.createServer((req, res) => {
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, CORS);
+      res.end();
+      return;
+    }
+    const url = new URL(req.url ?? '/', 'http://x');
+    const call = matchCall(getRoutes(), req.method ?? 'GET', url.pathname, cursor);
+    if (!call) {
+      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', ...CORS });
+      res.end(JSON.stringify({
+        error: 'no saved call matches this request',
+        method: req.method,
+        path: url.pathname,
+        hint: 'enable a flow or call for this endpoint in the Rebynx Flows tab',
+      }));
+      return;
+    }
+    const headers: Record<string, string> = { ...CORS };
+    for (const [k, v] of Object.entries(call.response.headers ?? {})) {
+      if (!STRIP.has(k.toLowerCase())) headers[k] = v;
+    }
+    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+      headers['content-type'] = 'application/json; charset=utf-8';
+    }
+    const body = call.response.body;
+    res.writeHead(call.status ?? 200, headers);
+    res.end(typeof body === 'string' ? body : JSON.stringify(body ?? null));
+  });
+}
