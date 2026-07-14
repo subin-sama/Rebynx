@@ -44,6 +44,17 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
     `DEVTOOLS_FLOWS_DIR`. Format is designed to also feed future replay + mock.
     The Flows tab has an **Export** button per flow (downloads the flow JSON via a
     Blob), so a flow can be imported into `api-ui-mapper` as mock overrides.
+  - `mock.ts` — **replay saved flows as a live API**. `createMockServer(getRoutes)`
+    is a second `http.Server` (port 9091, `DEVTOOLS_MOCK_PORT`) run in-process by
+    the relay; it answers requests matched by **method + path** (query/host
+    stripped), sequence-replaying repeated calls and clamping on the last. The
+    relay composes the route map from a registry of **enabled whole-flows +
+    individual calls** (deduped by `flowId#seq`, sequence merge) and starts/stops
+    the mock server as the registry changes. Control: `GET/DELETE /mock`,
+    `POST/DELETE /mock/flow/:id`, `POST/DELETE /mock/call/:flowId/:seq`. The Flows
+    tab toggles sources (per-flow in the list, per-call in the detail) and shows
+    the mock base URL to point an app's baseURL at. Adds permissive CORS; unmatched
+    request → 404 JSON.
 - **`packages/rn`** — `initDevTools()` wiring + `<DevToolsOverlay/>` (draggable
   bubble → tabbed mini panel). Reads from `memorySink`.
 - **`packages/desktop`** — Electron wrapper so there's nothing to run by hand.
