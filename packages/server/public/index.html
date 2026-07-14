@@ -147,6 +147,12 @@
       .mock-banner-row > span:nth-child(2) { flex: 1; color: var(--green); font-weight: 600; }
       .mock-stop { padding: 2px 12px; font-size: 11px; }
       .mock-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+      .mock-eps { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+      .mock-ep { display: flex; align-items: baseline; gap: 8px; }
+      .mock-ep .method { width: 42px; flex-shrink: 0; }
+      .mock-ep-url { color: var(--text); word-break: break-all; }
+      a.mock-ep-url { color: var(--accent); text-decoration: none; }
+      a.mock-ep-url:hover { text-decoration: underline; }
 
       /* In-app modal (portable name prompt / confirm — Electron has no window.prompt) */
       .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fade-in 0.12s ease-out; }

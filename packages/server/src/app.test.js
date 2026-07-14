@@ -419,6 +419,28 @@ describe('Flows — mock server', () => {
     expect(document.querySelector('#main .mock-flow.on[data-id="login"]')).toBeTruthy();
   });
 
+  test('the banner lists each active endpoint as a full, hittable mock URL', async () => {
+    stubFetch({
+      '/flows': [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }],
+      '/mock': activeStatus({
+        flows: ['login'],
+        endpoints: [
+          { method: 'GET', path: '/mock/api/workingTime', count: 1 },
+          { method: 'POST', path: '/mock/oauth/token', count: 1 },
+        ],
+      }),
+    });
+    const app = createApp(document);
+    app.setActive('flows');
+    await flush();
+    const urls = [...document.querySelectorAll('#main .mock-ep-url')].map((n) => n.textContent);
+    expect(urls).toContain('http://192.168.1.9:9091/mock/api/workingTime');
+    expect(urls).toContain('http://192.168.1.9:9091/mock/oauth/token');
+    // the GET endpoint is an anchor you can open in a browser
+    const getEp = [...document.querySelectorAll('#main .mock-ep')].find((el) => el.textContent.includes('workingTime'));
+    expect(getEp.querySelector('a')?.getAttribute('href')).toBe('http://192.168.1.9:9091/mock/api/workingTime');
+  });
+
   test('stopMock clears the banner', async () => {
     stubFetch({ 'DELETE /mock': { active: false, flows: [], calls: [], endpoints: [] } });
     const app = createApp(document);

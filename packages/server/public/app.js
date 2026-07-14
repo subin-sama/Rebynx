@@ -681,6 +681,15 @@ export function createApp(doc = globalThis.document) {
   function mockBanner() {
     if (!mockState.active) return '';
     const n = mockState.endpoints.length;
+    // Full, hittable URLs (base + path) so it's obvious what to call — the flow
+    // rows show the ORIGINAL captured host (e.g. 10.0.2.2:3000), not the mock.
+    const eps = (mockState.endpoints || []).map((e) => {
+      const full = mockState.url + e.path;
+      const link = e.method === 'GET'
+        ? `<a class="mock-ep-url" href="${esc(full)}" target="_blank" rel="noopener">${esc(full)}</a>`
+        : `<span class="mock-ep-url">${esc(full)}</span>`;
+      return `<div class="mock-ep"><span class="method">${esc(e.method)}</span>${link}</div>`;
+    }).join('');
     return `<div class="mock-banner">
       <div class="mock-banner-row">
         <span class="mock-dot"></span>
@@ -688,6 +697,7 @@ export function createApp(doc = globalThis.document) {
         <button class="mock-stop">Stop</button>
       </div>
       ${codeBlock('point your app’s baseURL here', mockState.url)}
+      ${eps ? `<div class="mock-eps">${eps}</div>` : ''}
     </div>`;
   }
 
