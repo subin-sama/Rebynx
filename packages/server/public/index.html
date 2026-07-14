@@ -154,6 +154,18 @@
       a.mock-ep-url { color: var(--accent); text-decoration: none; }
       a.mock-ep-url:hover { text-decoration: underline; }
 
+      /* Per-call editor (payload / response / status) */
+      .edit-call { padding: 2px 8px; font-size: 11px; }
+      .call-editor { margin: 8px 0 2px; padding: 10px; border: 1px solid var(--accent); border-radius: 8px; background: var(--panel-2); }
+      .edit-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      .edit-status { width: 90px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; font-family: var(--mono); outline: none; }
+      .edit-status:focus { border-color: var(--accent); }
+      .call-editor textarea { width: 100%; min-height: 120px; margin: 4px 0 8px; background: var(--panel); border: 1px solid var(--border); color: #c8cdd6; border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; outline: none; white-space: pre; }
+      .call-editor textarea:focus { border-color: var(--accent); }
+      .edit-error { color: var(--red); font-size: 11px; min-height: 14px; }
+      .edit-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+      .edit-save { border-color: var(--green); color: var(--green); }
+
       /* In-app modal (portable name prompt / confirm — Electron has no window.prompt) */
       .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fade-in 0.12s ease-out; }
       .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: min(420px, 90vw); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }

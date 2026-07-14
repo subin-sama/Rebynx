@@ -277,6 +277,7 @@ export function createApp(doc = globalThis.document) {
   let flowList = [];
   let flowDetail = null;
   let mockState = { active: false, port: 9091, url: '', flows: [], calls: [], endpoints: [] };
+  let editingCall = null; // seq of the flow-detail call being edited, or null
   let appsConnected = 0;      // RN apps currently connected to the relay
   let lanInfo = { lanIp: null };
   let stateAdapter = 'redux'; // which state-manager snippet the Setup tab shows
@@ -619,6 +620,7 @@ export function createApp(doc = globalThis.document) {
   }
 
   async function openFlow(id) {
+    editingCall = null;
     try { flowDetail = await (await fetch('/flows/' + encodeURIComponent(id))).json(); }
     catch { flowDetail = null; }
     await loadMock();
@@ -719,22 +721,78 @@ export function createApp(doc = globalThis.document) {
       </div>`).join('');
   }
 
+  // Enter/leave per-call edit mode (one call at a time).
+  function editCall(seq) { editingCall = Number(seq); if (active === 'flows') fullRender(); }
+  function cancelEdit() { editingCall = null; if (active === 'flows') fullRender(); }
+
+  // Validate the textareas as JSON and PATCH the call; on parse error, show it.
+  async function saveCallEdit(flowId, seq) {
+    const root = main();
+    const errEl = root.querySelector('.edit-error');
+    const reqEl = root.querySelector('.edit-req');
+    const resEl = root.querySelector('.edit-res');
+    const statusEl = root.querySelector('.edit-status');
+    let requestBody, responseBody;
+    try {
+      requestBody = JSON.parse(reqEl.value);
+      responseBody = JSON.parse(resEl.value);
+    } catch (e) {
+      if (errEl) errEl.textContent = 'Invalid JSON: ' + e.message;
+      return;
+    }
+    const patch = { requestBody, responseBody };
+    const status = parseInt(statusEl.value, 10);
+    if (!Number.isNaN(status)) patch.status = status;
+    try {
+      const res = await fetch('/flows/' + encodeURIComponent(flowId) + '/calls/' + encodeURIComponent(seq), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      editingCall = null;
+      flash('Saved call #' + seq);
+      await openFlow(flowId); // reload + re-render with the edit
+    } catch (err) {
+      if (errEl) errEl.textContent = 'Could not save: ' + err.message;
+    }
+  }
+
+  // The editor that replaces a call's read-only panels while editing.
+  function callEditor(f, c) {
+    const pretty = (v) => JSON.stringify(v === undefined ? null : v, null, 2);
+    return `<div class="call-editor">
+      <div class="edit-field"><span class="json-label">status</span><input class="edit-status" value="${esc(c.status != null ? c.status : 200)}" /></div>
+      <div class="json-label">request body (payload)</div>
+      <textarea class="edit-req" spellcheck="false">${esc(pretty(c.request && c.request.body))}</textarea>
+      <div class="json-label">response body</div>
+      <textarea class="edit-res" spellcheck="false">${esc(pretty(c.response && c.response.body))}</textarea>
+      <div class="edit-error"></div>
+      <div class="edit-btns">
+        <button class="edit-cancel">Cancel</button>
+        <button class="edit-save" data-flow="${esc(f.id)}" data-seq="${esc(c.seq)}">Save</button>
+      </div>
+    </div>`;
+  }
+
   function renderFlowDetail() {
     const f = flowDetail;
     const calls = f.calls || [];
     const body = calls.map((c) => {
       const statusCls = c.ok ? 'ok' : c.status ? 'err' : 'pending';
       const mocked = mockState.calls.includes(f.id + '#' + c.seq);
+      const editing = editingCall === c.seq;
       return `<div class="row">
         <span class="seq">#${c.seq}</span>
         <span class="method">${esc(c.method || '')}</span>
         <span class="status ${statusCls}">${c.status != null ? c.status : '···'}</span>
         <span class="url">${esc(c.url || '')}
-          <details><summary>details${c.duration != null ? ' · ' + c.duration + 'ms' : ''}</summary>
+          ${editing ? callEditor(f, c) : `<details><summary>details${c.duration != null ? ' · ' + c.duration + 'ms' : ''}</summary>
             ${jsonBlock('Request', c.request)}
             ${jsonBlock('Response' + (c.status != null ? ' · ' + c.status : ''), c.response)}
-          </details>
+          </details>`}
         </span>
+        ${editing ? '' : `<button class="edit-call" data-seq="${esc(c.seq)}">Edit</button>`}
         <button class="mock-call ${mocked ? 'on' : ''}" data-flow="${esc(f.id)}" data-seq="${esc(c.seq)}">${mocked ? '✓ Mocked' : 'Mock'}</button>
       </div>`;
     }).join('');
@@ -873,6 +931,11 @@ export function createApp(doc = globalThis.document) {
       const mcall = ev.target.closest('.mock-call');
       if (mcall) { ev.stopPropagation(); toggleCallMock(mcall.dataset.flow, mcall.dataset.seq); return; }
       if (ev.target.closest('.mock-stop')) { ev.stopPropagation(); stopMock(); return; }
+      const editBtn = ev.target.closest('.edit-call');
+      if (editBtn) { ev.stopPropagation(); editCall(editBtn.dataset.seq); return; }
+      const editSave = ev.target.closest('.edit-save');
+      if (editSave) { ev.stopPropagation(); saveCallEdit(editSave.dataset.flow, editSave.dataset.seq); return; }
+      if (ev.target.closest('.edit-cancel')) { ev.stopPropagation(); cancelEdit(); return; }
       const exp = ev.target.closest('.flow-export');
       if (exp) { ev.stopPropagation(); exportFlow(exp.dataset.id); return; }
       const del = ev.target.closest('.flow-del');
@@ -934,6 +997,9 @@ export function createApp(doc = globalThis.document) {
     stopMock,
     saveFlow,
     removeFlow,
+    openFlow,
+    editCall,
+    saveCallEdit,
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
     get statePaused() { return statePaused; },

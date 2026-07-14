@@ -513,6 +513,67 @@ describe('Flows — save/delete without native dialogs (Electron-safe)', () => {
   });
 });
 
+describe('Flows — edit a call (payload/response/status)', () => {
+  beforeEach(setupDom);
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const flow = {
+    id: 'edit', name: 'Edit', createdAt: 1, calls: [
+      { seq: 1, method: 'GET', url: 'https://api/x', status: 200, request: { headers: {}, body: { a: 1 } }, response: { headers: {}, body: { ok: true } } },
+    ],
+  };
+  const openDetail = async (app) => {
+    globalThis.fetch = (url, opts) => {
+      if (url === '/flows/edit') return Promise.resolve({ ok: true, status: 200, json: async () => flow });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ active: false, flows: [], calls: [], endpoints: [] }) });
+    };
+    app.setActive('flows');
+    await app.openFlow('edit');
+    await flush();
+  };
+
+  test('Edit shows a status input + payload and response textareas', async () => {
+    const app = createApp(document);
+    await openDetail(app);
+    app.editCall(1);
+    expect(document.querySelector('#main .edit-status')).toBeTruthy();
+    expect(document.querySelector('#main .edit-req')).toBeTruthy();
+    expect(document.querySelector('#main .edit-res')).toBeTruthy();
+  });
+
+  test('Save PATCHes the parsed bodies + status', async () => {
+    const app = createApp(document);
+    await openDetail(app);
+    app.editCall(1);
+    const patches = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'PATCH') { patches.push({ url, body: JSON.parse(opts.body) }); return Promise.resolve({ ok: true, status: 200, json: async () => flow }); }
+      if (url === '/flows/edit') return Promise.resolve({ ok: true, status: 200, json: async () => flow });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ active: false, flows: [], calls: [], endpoints: [] }) });
+    };
+    document.querySelector('#main .edit-res').value = '{"ok":false,"msg":"nope"}';
+    document.querySelector('#main .edit-status').value = '500';
+    await app.saveCallEdit('edit', 1);
+    expect(patches[0].url).toContain('/flows/edit/calls/1');
+    expect(patches[0].body.responseBody).toEqual({ ok: false, msg: 'nope' });
+    expect(patches[0].body.status).toBe(500);
+  });
+
+  test('invalid JSON shows an error and sends no PATCH', async () => {
+    const app = createApp(document);
+    await openDetail(app);
+    app.editCall(1);
+    let patched = false;
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'PATCH') patched = true;
+      return Promise.resolve({ ok: true, status: 200, json: async () => flow });
+    };
+    document.querySelector('#main .edit-res').value = '{ not json';
+    await app.saveCallEdit('edit', 1);
+    expect(patched).toBe(false);
+    expect(document.querySelector('#main .edit-error').textContent.length).toBeGreaterThan(0);
+  });
+});
+
 describe('bounded history (perf)', () => {
   beforeEach(setupDom);
 

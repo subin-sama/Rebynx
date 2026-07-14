@@ -41,7 +41,11 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
     tab and persist it as `flows/<id>.json` (url + request + response per call, in
     order). REST: `GET/POST /flows`, `GET/DELETE /flows/:id`. `slugify`/`safeId`
     keep ids to `[a-z0-9-]` (no path traversal). Dir overridable via
-    `DEVTOOLS_FLOWS_DIR`. Format is designed to also feed future replay + mock.
+    `DEVTOOLS_FLOWS_DIR`. `updateCall()` edits a saved call's payload/response
+    body/status in place (`PATCH /flows/:id/calls/:seq`), so a captured response
+    can be reshaped into the mock scenario you want — the Flows detail view has a
+    per-call **Edit** (JSON textareas + status), and a running mock rebuilds its
+    routes on edit. Format is designed to also feed future replay + mock.
     The Flows tab has an **Export** button per flow (downloads the flow JSON via a
     Blob), so a flow can be imported into `api-ui-mapper` as mock overrides.
   - `mock.ts` — **replay saved flows as a live API**. `createMockServer(getRoutes)`
