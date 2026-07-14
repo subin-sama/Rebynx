@@ -9,6 +9,7 @@ import {
   safeId,
   saveFlow,
   slugify,
+  updateCall,
   type FlowCall,
 } from './flows.js';
 
@@ -142,5 +143,43 @@ describe('deleteFlow', () => {
     expect(fs.existsSync(path.join(dir, 'temp.json'))).toBe(false);
     expect(await deleteFlow(dir, 'temp')).toBe(false);
     expect(await deleteFlow(dir, '../etc')).toBe(false);
+  });
+});
+
+describe('updateCall', () => {
+  test('edits response body, request body and status, recomputing ok + persisting', async () => {
+    await saveFlow(dir, { name: 'Flow', calls: [call(1), call(2)] });
+
+    const updated = await updateCall(dir, 'flow', 1, {
+      requestBody: { a: 99 },
+      responseBody: { changed: true },
+      status: 401,
+    });
+
+    expect(updated).not.toBeNull();
+    const c1 = updated!.calls.find((c) => c.seq === 1)!;
+    expect(c1.request.body).toEqual({ a: 99 });
+    expect(c1.response.body).toEqual({ changed: true });
+    expect(c1.status).toBe(401);
+    expect(c1.ok).toBe(false); // recomputed from status
+    // other calls untouched
+    expect(updated!.calls.find((c) => c.seq === 2)!.response.body).toEqual({ ok: true });
+
+    // persisted to disk
+    const reloaded = await getFlow(dir, 'flow');
+    expect(reloaded!.calls.find((c) => c.seq === 1)!.response.body).toEqual({ changed: true });
+  });
+
+  test('a body can be set to null (presence-checked, not truthiness)', async () => {
+    await saveFlow(dir, { name: 'Flow', calls: [call(1)] });
+    const updated = await updateCall(dir, 'flow', 1, { responseBody: null });
+    expect(updated!.calls[0].response.body).toBeNull();
+  });
+
+  test('returns null for an unknown id or seq', async () => {
+    await saveFlow(dir, { name: 'Flow', calls: [call(1)] });
+    expect(await updateCall(dir, 'nope', 1, { status: 200 })).toBeNull();
+    expect(await updateCall(dir, 'flow', 999, { status: 200 })).toBeNull();
+    expect(await updateCall(dir, '../etc', 1, { status: 200 })).toBeNull();
   });
 });

@@ -130,6 +130,38 @@ export async function getFlow(dir: string, id: string): Promise<Flow | null> {
   }
 }
 
+/** Fields of a single call that can be edited in place. */
+export interface CallPatch {
+  requestBody?: unknown;
+  responseBody?: unknown;
+  status?: number;
+}
+
+/**
+ * Edit one call of a saved flow in place and persist it. Applies only the fields
+ * present in `patch` (bodies are presence-checked so they can be set to null);
+ * a new `status` recomputes `ok`. Returns the updated Flow, or null if the id or
+ * seq is unknown.
+ */
+export async function updateCall(dir: string, id: string, seq: number, patch: CallPatch): Promise<Flow | null> {
+  const clean = safeId(id);
+  if (!clean) return null;
+  const flow = await getFlow(dir, clean);
+  if (!flow) return null;
+  const call = flow.calls.find((c) => c.seq === seq);
+  if (!call) return null;
+
+  if ('requestBody' in patch) call.request = { ...call.request, body: patch.requestBody };
+  if ('responseBody' in patch) call.response = { ...call.response, body: patch.responseBody };
+  if (typeof patch.status === 'number') {
+    call.status = patch.status;
+    call.ok = patch.status < 400;
+  }
+
+  await fs.writeFile(fileFor(dir, clean), JSON.stringify(flow, null, 2), 'utf8');
+  return flow;
+}
+
 export async function deleteFlow(dir: string, id: string): Promise<boolean> {
   const clean = safeId(id);
   if (!clean) return false;
