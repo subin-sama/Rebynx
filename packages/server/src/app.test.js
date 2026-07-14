@@ -3,11 +3,11 @@
 // Tests the browser client (public/app.js). Written in JS so it can import the
 // static client module directly; tsc ignores .js, vitest runs it.
 import { beforeEach, describe, expect, test } from 'vitest';
-import { createApp, syntaxHighlight, jsonBlock, STATE_SNIPPETS } from '../public/app.js';
+import { createApp, syntaxHighlight, jsonBlock, STATE_SNIPPETS, MAX_EVENTS, diffState, jsonTree } from '../public/app.js';
 
 function setupDom() {
   document.body.innerHTML =
-    `<span id="app-status"></span><div id="tabs"></div><main id="main"></main><span id="flash"></span>`;
+    `<span id="app-status"></span><input id="filter" /><div id="tabs"></div><main id="main"></main><span id="flash"></span>`;
 }
 
 const netEvent = (n, extra = {}) => ({
@@ -196,5 +196,205 @@ describe('state-manager snippets', () => {
     app.handleInfo({ lanIp: '10.0.0.5', apps: 0 });
     app.selectStateAdapter('nope');
     expect(app.stateAdapter).toBe('redux');
+  });
+});
+
+describe('Clear', () => {
+  beforeEach(setupDom);
+
+  // Regression: after Clear, a leftover filter used to keep hiding new logs, so
+  // the tab looked permanently empty ("no logs after clear").
+  test('resets the filter so new logs are shown after clearing', () => {
+    const app = createApp(document);
+    app.setActive('logs');
+    app.setFilter('checkout');
+
+    const log = (id, msg) => app.ingest({ id, ts: id, type: 'log', level: 'info', message: msg, args: [msg] });
+    log(1, 'user tapped login'); // no "checkout" -> filtered out
+    expect(document.querySelectorAll('#main .row').length).toBe(0);
+
+    app.clearAll();
+    expect(document.getElementById('filter').value).toBe(''); // input reset too
+
+    log(2, 'user opened profile'); // no "checkout"
+    expect(document.querySelectorAll('#main .row').length).toBe(1); // now visible
+  });
+});
+
+describe('State — left/right split', () => {
+  beforeEach(setupDom);
+
+  const stateEvent = (id, store, action, state) => ({ id, ts: 1, type: 'state', store, action, state });
+  const rightTree = () => JSON.parse(document.querySelector('#main .state-right pre').textContent);
+  const treeLeaf = (path) => document.querySelector(`#main .state-right [data-path="${path}"] .jt-leafval`)?.textContent;
+
+  test('renders a split (timeline left, tree right) with no Current/Timeline toggle', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    expect(document.querySelector('#main .state-split')).toBeTruthy();
+    expect(document.querySelector('#main .state-left')).toBeTruthy();
+    expect(document.querySelector('#main .state-right')).toBeTruthy();
+    expect(document.querySelector('#main .state-view-opt')).toBeNull();
+  });
+
+  test('left lists a row per event; right defaults to the live current merged tree', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('a', 'redux', 'A', { count: 1 }));
+    app.ingest(stateEvent('b', 'cart', 'ADD', { items: [1] }));
+    expect(document.querySelectorAll('#main .state-left .state-item').length).toBe(2);
+    // right = live current tree with both stores
+    expect(document.querySelector('#main .state-right .jt-tree')).toBeTruthy();
+    expect(treeLeaf('redux.count')).toBe('1');
+    expect(document.querySelector('#main .state-right [data-path="cart.items"]')).toBeTruthy();
+  });
+
+  test('clicking an action shows that snapshot on the right; Live returns to current', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('a', 'redux', 'A', { count: 1 }));
+    app.ingest(stateEvent('b', 'redux', 'B', { count: 2 })); // current = 2
+
+    app.selectStateEvent('a'); // pick the older snapshot
+    expect(rightTree()).toEqual({ count: 1 });
+    expect(document.querySelector('#main .state-item.sel')).toBeTruthy();
+
+    // a new event while an action is selected must NOT change the right pane
+    app.ingest(stateEvent('c', 'redux', 'C', { count: 3 }));
+    expect(rightTree()).toEqual({ count: 1 });
+
+    app.goLiveState(); // back to the live current (latest)
+    expect(treeLeaf('redux.count')).toBe('3');
+  });
+
+  test('Pause freezes the live current pane while events flow; Resume shows latest', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('a', 'redux', 'A', { count: 1 }));
+    app.togglePause();
+    expect(app.statePaused).toBe(true);
+    app.ingest(stateEvent('b', 'redux', 'B', { count: 2 }));
+    expect(treeLeaf('redux.count')).toBe('1'); // frozen
+    app.togglePause();
+    expect(treeLeaf('redux.count')).toBe('2');
+  });
+
+  test('clearAll empties both panes', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('a', 'redux', 'A', { count: 1 }));
+    app.clearAll();
+    expect(document.querySelectorAll('#main .state-left .state-item').length).toBe(0);
+    expect(document.querySelector('#main .state-right pre')).toBeNull();
+  });
+});
+
+describe('State — action diff', () => {
+  beforeEach(setupDom);
+
+  const stateEvent = (id, action, state) => ({ id, ts: 1, type: 'state', store: 'redux', action, state });
+
+  test('diffState reports added / removed / changed by path', () => {
+    expect(diffState({ a: 1, b: 2 }, { a: 1, b: 3, c: 4 })).toEqual([
+      { path: 'b', kind: 'changed', from: 2, to: 3 },
+      { path: 'c', kind: 'added', to: 4 },
+    ]);
+    expect(diffState({ a: { x: 1 } }, { a: { x: 2 } })).toEqual([{ path: 'a.x', kind: 'changed', from: 1, to: 2 }]);
+    expect(diffState({ a: 1 }, {})).toEqual([{ path: 'a', kind: 'removed', from: 1 }]);
+    expect(diffState({ a: 1 }, { a: 1 })).toEqual([]);
+  });
+
+  test('selecting an action shows what it changed vs the previous state', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('s1', 'LOGIN', { cart: { items: [] } }));
+    app.ingest(stateEvent('s2', 'ADD', { cart: { items: [{ sku: 'A1' }] } }));
+    app.selectStateEvent('s2');
+    const diff = document.querySelector('#main .state-diff');
+    expect(diff).toBeTruthy();
+    expect(diff.textContent).toContain('cart.items');
+  });
+
+  test('the first state for a store shows no prior diff (initial)', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('s1', 'INIT', { a: 1 }));
+    app.selectStateEvent('s1');
+    expect(document.querySelector('#main .state-diff').textContent.toLowerCase()).toContain('initial');
+  });
+});
+
+describe('State — JSON tree + change flash', () => {
+  beforeEach(setupDom);
+
+  const stateEvent = (id, action, state) => ({ id, ts: 1, type: 'state', store: 'redux', action, state });
+
+  test('jsonTree renders dot-path nodes (matching diffState) with values', () => {
+    const html = jsonTree({ redux: { cart: { total: 250 } } });
+    expect(html).toContain('data-path="redux"');
+    expect(html).toContain('data-path="redux.cart"');
+    expect(html).toContain('data-path="redux.cart.total"');
+    expect(html).toContain('250');
+    expect(html).toContain('jt-branch'); // objects are collapsible
+  });
+
+  test('a state change flashes the changed node (not the unchanged one) in the live tree', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('s1', 'A', { cart: { total: 0, items: [] } }));
+    app.ingest(stateEvent('s2', 'B', { cart: { total: 250, items: [] } })); // only total changed
+    const changed = document.querySelector('#main .state-right [data-path="redux.cart.total"]');
+    const unchanged = document.querySelector('#main .state-right [data-path="redux.cart.items"]');
+    expect(changed.classList.contains('flash')).toBe(true);
+    expect(unchanged.classList.contains('flash')).toBe(false);
+  });
+});
+
+describe('State — action payload', () => {
+  beforeEach(setupDom);
+
+  const stateEvent = (id, action, payload, state) => ({ id, ts: 1, type: 'state', store: 'redux', action, payload, state });
+  const rightLabels = () =>
+    [...document.querySelectorAll('#main .state-right .json-label')].map((n) => n.textContent);
+  const payloadPre = () =>
+    [...document.querySelectorAll('#main .state-right .json-block')]
+      .find((b) => b.querySelector('.json-label')?.textContent === 'payload')
+      ?.querySelector('pre')?.textContent;
+
+  test('selecting an action shows its dispatched payload', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('s1', 'ADD_ITEM', { sku: 'A1', qty: 2 }, { cart: { items: [{ sku: 'A1' }] } }));
+    app.selectStateEvent('s1');
+    expect(rightLabels()).toContain('payload');
+    expect(payloadPre()).toContain('A1');
+    expect(payloadPre()).toContain('qty');
+  });
+
+  test('an action with no payload shows no payload panel', () => {
+    const app = createApp(document);
+    app.setActive('state');
+    app.ingest(stateEvent('s1', 'RESET', undefined, { cart: { items: [] } }));
+    app.selectStateEvent('s1');
+    expect(rightLabels()).not.toContain('payload');
+  });
+});
+
+describe('bounded history (perf)', () => {
+  beforeEach(setupDom);
+
+  // Regression: a chatty store used to grow events + the DOM without bound, so
+  // clearing a filter / switching tabs eventually froze the UI.
+  test('caps retained events and DOM rows so re-render stays bounded', () => {
+    const app = createApp(document);
+    app.setActive('logs');
+    for (let i = 0; i < MAX_EVENTS + 200; i++) {
+      app.ingest({ id: 'c' + i, ts: i, type: 'log', level: 'info', message: 'm' + i, args: ['m' + i] });
+    }
+    expect(app.events.length).toBe(MAX_EVENTS);
+    expect(document.querySelectorAll('#main .row').length).toBeLessThanOrEqual(MAX_EVENTS);
+    // the oldest events are dropped; the newest are kept
+    expect(app.events[app.events.length - 1].message).toBe('m' + (MAX_EVENTS + 199));
+    expect(app.events[0].message).toBe('m200');
   });
 });

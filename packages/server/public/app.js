@@ -93,12 +93,18 @@ trackStore(devtoolsHub, {
 export const esc = (s) =>
   String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
+// Keep only the most recent N events (and DOM rows). A chatty app — e.g. a
+// redux-saga store emitting a state snapshot per action — otherwise grows the
+// events array and the DOM without bound, so re-rendering (clearing a filter,
+// switching tabs) eventually freezes the UI.
+export const MAX_EVENTS = 1000;
+
 const time = (ts) =>
   new Date(ts).toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(ts % 1000).padStart(3, '0');
 
-/** Pretty-print a value as JSON with lightweight token colouring. */
-export function syntaxHighlight(value) {
-  const json = JSON.stringify(value, null, 2);
+/** Pretty-print a value as JSON with lightweight token colouring. `indent` 0 = compact. */
+export function syntaxHighlight(value, indent = 2) {
+  const json = JSON.stringify(value, null, indent);
   if (json === undefined) return esc(String(value));
   return esc(json).replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
@@ -118,6 +124,75 @@ export function jsonBlock(label, value) {
     <div class="json-bar"><span class="json-label">${esc(label)}</span><button class="copy-btn" type="button">Copy</button></div>
     <pre>${syntaxHighlight(value)}</pre>
   </div>`;
+}
+
+const isPlainObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Deep-diff two state snapshots into a flat, path-keyed change list:
+ * `[{ path, kind: 'added'|'removed'|'changed', from?, to? }]`. Arrays and
+ * primitives are compared whole (by JSON), objects are walked key by key.
+ */
+export function diffState(prev, next, path = '', out = []) {
+  if (!isPlainObj(prev) || !isPlainObj(next)) {
+    if (JSON.stringify(prev) !== JSON.stringify(next)) out.push({ path, kind: 'changed', from: prev, to: next });
+    return out;
+  }
+  for (const k of new Set([...Object.keys(prev), ...Object.keys(next)])) {
+    const p = path ? `${path}.${k}` : k;
+    if (!(k in prev)) out.push({ path: p, kind: 'added', to: next[k] });
+    else if (!(k in next)) out.push({ path: p, kind: 'removed', from: prev[k] });
+    else if (isPlainObj(prev[k]) && isPlainObj(next[k])) diffState(prev[k], next[k], p, out);
+    else if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) out.push({ path: p, kind: 'changed', from: prev[k], to: next[k] });
+  }
+  return out;
+}
+
+function diffVal(v) {
+  const s = JSON.stringify(v);
+  const str = s === undefined ? 'undefined' : s;
+  return `<span class="diff-val">${esc(str.length > 90 ? str.slice(0, 90) + '…' : str)}</span>`;
+}
+
+/** Render a change list from diffState (null = no prior state) as a coloured panel. */
+export function diffHtml(changes) {
+  const bar = `<div class="json-bar"><span class="json-label">changes</span></div>`;
+  if (changes === null) return `<div class="state-diff">${bar}<div class="diff-empty">initial — no prior state</div></div>`;
+  if (!changes.length) return `<div class="state-diff">${bar}<div class="diff-empty">no change</div></div>`;
+  const rows = changes.map((c) => {
+    const sign = c.kind === 'added' ? '+' : c.kind === 'removed' ? '−' : '~';
+    const val = c.kind === 'changed'
+      ? `${diffVal(c.from)} <span class="diff-arrow">→</span> ${diffVal(c.to)}`
+      : diffVal(c.kind === 'added' ? c.to : c.from);
+    return `<div class="diff-row diff-${c.kind}"><span class="diff-sign">${sign}</span><span class="diff-path">${esc(c.path)}</span> ${val}</div>`;
+  }).join('');
+  return `<div class="state-diff">${bar}<div class="diff-body">${rows}</div></div>`;
+}
+
+// One entry (key -> value) of the JSON tree. Objects recurse into collapsible
+// branches; arrays/primitives are leaves. Each node's data-path is dot notation
+// aligned with diffState, so a change can be located + flashed by selector.
+function jtEntry(key, value, path) {
+  const p = path ? `${path}.${key}` : key;
+  if (isPlainObj(value)) {
+    const keys = Object.keys(value);
+    const kids = keys.length
+      ? keys.map((k) => jtEntry(k, value[k], p)).join('')
+      : '<div class="jt-row jt-empty">{ }</div>';
+    return `<div class="jt-node jt-obj" data-path="${esc(p)}">
+      <div class="jt-row jt-branch"><span class="jt-caret"></span><span class="jt-key">${esc(key)}</span><span class="jt-punc">:</span></div>
+      <div class="jt-kids">${kids}</div>
+    </div>`;
+  }
+  return `<div class="jt-node jt-leaf" data-path="${esc(p)}">
+    <div class="jt-row"><span class="jt-key">${esc(key)}</span><span class="jt-punc">:</span> <span class="jt-leafval">${syntaxHighlight(value, 0)}</span></div>
+  </div>`;
+}
+
+/** Render `{ [store]: state }` as a collapsible, path-tagged JSON tree. */
+export function jsonTree(obj) {
+  if (!isPlainObj(obj) || !Object.keys(obj).length) return '<div class="empty">no state yet — wire a store adapter (see Setup)</div>';
+  return `<div class="jt-tree">${Object.keys(obj).map((k) => jtEntry(k, obj[k], '')).join('')}</div>`;
 }
 
 function srcLink(source) {
@@ -204,6 +279,10 @@ export function createApp(doc = globalThis.document) {
   let appsConnected = 0;      // RN apps currently connected to the relay
   let lanInfo = { lanIp: null };
   let stateAdapter = 'redux'; // which state-manager snippet the Setup tab shows
+  let statePaused = false;    // freeze the live current tree so a streaming store is readable
+  let selectedState = null;   // a picked past state event (frozen), or null = live current
+  const latestState = {};     // { [store]: latest snapshot } for the current tree
+  let lastChangedPaths = [];  // tree data-paths changed by the most recent state event
   let ws;
 
   const matches = (e) => !filter || JSON.stringify(e).toLowerCase().includes(filter);
@@ -220,10 +299,116 @@ export function createApp(doc = globalThis.document) {
 
   // Full rebuild of #main for the active tab. Used on tab switch / filter /
   // clear / flow nav — NOT on every incoming event (that's what append is for).
+  // ---- State tab: Current (merged tree) / Timeline (per-action rows) ----
+  // Left pane: one clickable row per state event (ts · store · action).
+  function stateItemHtml(e) {
+    return `<div class="state-item ${selectedState === e ? 'sel' : ''}" data-sid="${esc(e.id)}">
+      <span class="ts">${time(e.ts)}</span>
+      <span class="store-tag">${esc(e.store)}</span>
+      ${e.action ? `<span class="action-tag">${esc(e.action)}</span>` : ''}
+    </div>`;
+  }
+
+  function renderStateTimeline() {
+    const el = $('state-left');
+    if (!el) return;
+    const list = events.filter((e) => e.type === 'state' && matches(e)).slice(-MAX_EVENTS);
+    el.innerHTML = list.length ? list.map(stateItemHtml).join('') : `<div class="empty">no state yet</div>`;
+  }
+
+  // The previous state event for the same store (to diff against), or null.
+  function prevStateOf(e) {
+    const idx = events.indexOf(e);
+    for (let i = idx - 1; i >= 0; i--) {
+      if (events[i].type === 'state' && events[i].store === e.store) return events[i];
+    }
+    return null;
+  }
+
+  // Right pane: a picked snapshot (frozen) + what it changed, else the live tree.
+  function stateDetailHtml() {
+    if (selectedState) {
+      const prev = prevStateOf(selectedState);
+      const changes = prev ? diffState(prev.state, selectedState.state) : null;
+      const payload = selectedState.payload !== undefined ? jsonBlock('payload', selectedState.payload) : '';
+      return `<div class="state-detail-bar">
+        <span class="json-label">${esc(selectedState.store)}${selectedState.action ? ' · ' + esc(selectedState.action) : ''}</span>
+        <button class="state-live">← Live</button>
+      </div>${payload}${diffHtml(changes)}${jsonBlock('state', selectedState.state)}`;
+    }
+    const bar = `<div class="state-detail-bar">
+      <span class="json-label">current state — live</span>
+      <button class="state-pause ${statePaused ? 'paused' : ''}">${statePaused ? '▶ Resume' : '⏸ Pause'}</button>
+    </div>`;
+    return bar + jsonTree(latestState);
+  }
+
+  function renderStateDetail() {
+    const el = $('state-right');
+    if (el) el.innerHTML = stateDetailHtml();
+  }
+
+  // After a live re-render, flash the nodes this event changed + reveal the first.
+  function flashChanges(paths) {
+    const right = $('state-right');
+    if (!right || !paths || !paths.length) return;
+    let first = null;
+    for (const p of paths) {
+      let node = null;
+      try { node = right.querySelector(`.jt-node[data-path="${p}"]`); } catch { node = null; }
+      if (node) { node.classList.add('flash'); if (!first) first = node; }
+    }
+    if (first && first.scrollIntoView) first.scrollIntoView({ block: 'nearest' });
+  }
+
+  function renderStateTab() {
+    netNodes.clear();
+    main().innerHTML =
+      `<div class="state-split"><div class="state-left" id="state-left"></div><div class="state-right" id="state-right"></div></div>`;
+    renderStateTimeline();
+    renderStateDetail();
+  }
+
+  function selectStateEvent(id) {
+    selectedState = events.find((e) => e.type === 'state' && e.id === id) || null;
+    const el = $('state-left');
+    if (el) el.querySelectorAll('.state-item').forEach((n) => n.classList.toggle('sel', n.dataset.sid === id));
+    renderStateDetail();
+  }
+
+  function goLiveState() {
+    selectedState = null;
+    const el = $('state-left');
+    if (el) el.querySelectorAll('.state-item.sel').forEach((n) => n.classList.remove('sel'));
+    renderStateDetail();
+  }
+
+  function togglePause() {
+    statePaused = !statePaused;
+    if (active === 'state' && !selectedState) renderStateDetail(); // on resume, catch up
+  }
+
+  // A state event: append to the left timeline; refresh the right only when it is
+  // showing the live current tree (not a frozen selection) and not paused.
+  function liveStateRow(e) {
+    if (e.type !== 'state' || !matches(e)) return;
+    const el = $('state-left');
+    if (el) {
+      const empty = el.querySelector('.empty');
+      if (empty) el.innerHTML = '';
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      el.appendChild(htmlToNode(doc, stateItemHtml(e)));
+      while (el.childElementCount > MAX_EVENTS) el.removeChild(el.firstElementChild);
+      if (nearBottom) el.scrollTop = el.scrollHeight;
+    }
+    if (!selectedState && !statePaused) { renderStateDetail(); flashChanges(lastChangedPaths); }
+  }
+
   function fullRender() {
     renderTabs();
     if (active === 'setup') return renderSetup();
     if (active === 'flows') return renderFlows();
+    if (active === 'state') return renderStateTab();
     netNodes.clear();
     const el = main();
     const plugin = PLUGINS.find((p) => p.id === active);
@@ -245,6 +430,7 @@ export function createApp(doc = globalThis.document) {
   // selection the user is reading/copying survives the next event.
   function liveRow(e) {
     if (active === 'setup' || active === 'flows') return;
+    if (active === 'state') { liveStateRow(e); return; }
     const plugin = PLUGINS.find((p) => p.id === active);
     if (!plugin.accepts(e) || !matches(e)) return;
 
@@ -262,9 +448,23 @@ export function createApp(doc = globalThis.document) {
       const node = htmlToNode(doc, RENDERERS[active](e));
       el.appendChild(node);
       if (e.type === 'network') netNodes.set(e.reqId, node);
+      // Keep the DOM bounded — drop the oldest row(s) past the cap.
+      while (el.childElementCount > MAX_EVENTS) el.removeChild(el.firstElementChild);
     }
 
     if (nearBottom) el.scrollTop = el.scrollHeight;
+  }
+
+  // Drop the oldest events once we exceed the cap, keeping memory + the DOM
+  // (and therefore every re-render) bounded no matter how chatty the app is.
+  function capEvents() {
+    while (events.length > MAX_EVENTS) {
+      const dropped = events.shift();
+      if (dropped && dropped.type === 'network') {
+        netIndex.delete(dropped.reqId);
+        netNodes.delete(dropped.reqId);
+      }
+    }
   }
 
   function ingest(e) {
@@ -281,6 +481,14 @@ export function createApp(doc = globalThis.document) {
     } else {
       events.push(e);
     }
+    // Track the latest snapshot per store + which tree paths this event changed.
+    if (e.type === 'state') {
+      const prev = latestState[e.store];
+      lastChangedPaths = diffState(prev === undefined ? {} : prev, e.state)
+        .map((c) => (c.path ? `${e.store}.${c.path}` : e.store));
+      latestState[e.store] = e.state;
+    }
+    capEvents();
     renderTabs();
     liveRow(row);
   }
@@ -289,7 +497,14 @@ export function createApp(doc = globalThis.document) {
     events.length = 0;
     netIndex.clear();
     netNodes.clear();
+    for (const k of Object.keys(latestState)) delete latestState[k];
+    selectedState = null;
     flowDetail = null;
+    // Reset the filter too — otherwise a leftover filter keeps hiding the events
+    // that stream in after Clear, making the tab look permanently empty.
+    filter = '';
+    const filterInput = $('filter');
+    if (filterInput) filterInput.value = '';
     fullRender();
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ kind: 'command', command: { type: 'clear' } }));
@@ -554,6 +769,12 @@ export function createApp(doc = globalThis.document) {
     $('filter').addEventListener('input', (ev) => setFilter(ev.target.value));
     $('clear').addEventListener('click', clearAll);
     main().addEventListener('click', (ev) => {
+      const branch = ev.target.closest('.jt-branch');
+      if (branch) { ev.stopPropagation(); branch.parentElement.classList.toggle('collapsed'); return; }
+      const item = ev.target.closest('.state-item');
+      if (item) { ev.stopPropagation(); selectStateEvent(item.dataset.sid); return; }
+      if (ev.target.closest('.state-live')) { ev.stopPropagation(); goLiveState(); return; }
+      if (ev.target.closest('.state-pause')) { ev.stopPropagation(); togglePause(); return; }
       const stateOpt = ev.target.closest('.state-opt');
       if (stateOpt) { ev.stopPropagation(); selectStateAdapter(stateOpt.dataset.adapter); return; }
       const copyBtn = ev.target.closest('.copy-btn');
@@ -613,12 +834,16 @@ export function createApp(doc = globalThis.document) {
     set flowDetail(v) { flowDetail = v; },
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
+    get statePaused() { return statePaused; },
     fullRender,
     copyFrom,
     handleInfo,
     handlePresence,
     renderSetup,
     selectStateAdapter,
+    selectStateEvent,
+    goLiveState,
+    togglePause,
   };
   return controller;
 }

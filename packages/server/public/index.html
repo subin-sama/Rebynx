@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Rebynx</title>
+    <link rel="icon" type="image/png" href="/assets/rebynx-icon-256.png" />
     <style>
       :root {
         --bg: #16181d;
@@ -39,6 +40,19 @@
         border-bottom: 1px solid var(--border);
       }
       header .title { font-weight: 600; letter-spacing: 0.3px; }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .brand-mark {
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        object-fit: cover;
+        box-shadow: 0 0 16px rgba(61, 196, 255, 0.22);
+      }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
       .dot.on { background: var(--green); }
       header .conn { color: var(--muted); display: flex; align-items: center; gap: 6px; }
@@ -151,13 +165,62 @@
       .state-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
       .state-opt { padding: 3px 10px; font-size: 11px; border-radius: 6px; }
       .state-opt.active { border-color: var(--accent); color: var(--accent); }
+      .state-split { display: flex; height: 100%; }
+      .state-left { width: 320px; flex-shrink: 0; border-right: 1px solid var(--border); overflow: auto; }
+      .state-right { flex: 1; overflow: auto; min-width: 0; }
+      .state-item { display: flex; gap: 8px; align-items: baseline; padding: 5px 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+      .state-item:hover { background: var(--panel); }
+      .state-item.sel { background: var(--panel); box-shadow: inset 2px 0 0 var(--accent); }
+      .state-detail-bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+      .state-live, .state-pause { padding: 3px 12px; font-size: 11px; border-radius: 6px; }
+      .state-pause.paused { border-color: var(--yellow); color: var(--yellow); }
+      .state-current { padding: 4px 10px 12px; }
+      .state-diff { margin: 8px 12px 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+      /* Snapshot + payload panels align to the same 12px inset as the diff + tree */
+      .state-right .json-block { margin: 8px 12px; }
+      .diff-body { padding: 6px 4px; max-height: 240px; overflow: auto; }
+      .diff-empty { padding: 8px 10px; color: var(--muted); }
+      .diff-row { display: flex; gap: 6px; align-items: baseline; padding: 2px 8px; white-space: pre-wrap; word-break: break-word; }
+      .diff-sign { flex-shrink: 0; width: 10px; text-align: center; }
+      .diff-path { color: var(--text); flex-shrink: 0; }
+      .diff-val { color: var(--muted); }
+      .diff-arrow { color: var(--muted); }
+      .diff-added .diff-sign, .diff-added .diff-path { color: var(--green); }
+      .diff-removed .diff-sign, .diff-removed .diff-path { color: var(--red); }
+      .diff-changed .diff-sign, .diff-changed .diff-path { color: var(--yellow); }
+
+      /* Current state as a collapsible, flash-on-change JSON tree */
+      .jt-tree { padding: 8px 12px 14px; }
+      .jt-row { padding: 1px 2px; white-space: pre-wrap; word-break: break-word; border-radius: 4px; }
+      .jt-branch { cursor: pointer; user-select: none; }
+      .jt-branch:hover .jt-key { text-decoration: underline; }
+      .jt-caret { display: inline-block; width: 12px; color: var(--muted); }
+      .jt-caret::before { content: "▾"; }
+      .jt-obj.collapsed > .jt-branch .jt-caret::before { content: "▸"; }
+      .jt-obj.collapsed > .jt-kids { display: none; }
+      .jt-kids { margin-left: 5px; border-left: 1px solid var(--border); padding-left: 10px; }
+      .jt-key { color: var(--accent); }
+      .jt-punc { color: var(--muted); }
+      .jt-leafval { color: #c8cdd6; }
+      @keyframes jt-flash { 0% { background: rgba(230, 192, 123, 0.32); } 100% { background: transparent; } }
+      .jt-node.flash > .jt-row { animation: jt-flash 1.15s ease-out; }
+
+      /* subtle motion */
+      @keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+      .state-item { animation: fade-in 0.18s ease-out; }
+      .tab { transition: color 0.12s, border-color 0.12s; }
+      button { transition: border-color 0.12s, color 0.12s, background 0.12s; }
+      .row, .state-item { transition: background 0.1s; }
       .setup-hint { color: var(--muted); margin-top: 8px; font-size: 11px; line-height: 1.5; }
       .setup-hint code { color: var(--text); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
     </style>
   </head>
   <body>
     <header>
-      <span class="title">Rebynx</span>
+      <span class="brand">
+        <img class="brand-mark" src="/assets/rebynx-icon-256.png" alt="" />
+        <span class="title">Rebynx</span>
+      </span>
       <span class="conn"><span class="dot" id="dot"></span><span id="conn-text">connecting…</span></span>
       <span class="app-status" id="app-status">○ waiting for app</span>
       <input id="filter" placeholder="filter…" />
