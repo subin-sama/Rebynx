@@ -251,3 +251,48 @@ describe('/mock (serve saved flows as an API)', () => {
     expect((await fetch(`${base}/mock/flow/nope`, { method: 'POST' })).status).toBe(404);
   });
 });
+
+describe('PATCH /flows/:id/calls/:seq (edit a saved call)', () => {
+  async function save() {
+    await fetch(`${base}/flows`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'edit',
+        calls: [{ seq: 1, method: 'GET', url: 'https://api/x/profile', status: 200, request: {}, response: { headers: {}, body: { name: 'Jane' } } }],
+      }),
+    });
+  }
+
+  test('edits a call and returns the updated flow', async () => {
+    await save();
+    const res = await fetch(`${base}/flows/edit/calls/1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ responseBody: { name: 'EDITED' }, status: 403 }),
+    });
+    expect(res.status).toBe(200);
+    const flow: any = await res.json();
+    expect(flow.calls[0].response.body).toEqual({ name: 'EDITED' });
+    expect(flow.calls[0].status).toBe(403);
+    expect(flow.calls[0].ok).toBe(false);
+  });
+
+  test('a live mock serves the edited response after PATCH (no re-toggle)', async () => {
+    await save();
+    const status: any = await (await fetch(`${base}/mock/flow/edit`, { method: 'POST' })).json();
+    expect(await (await fetch(`http://127.0.0.1:${status.port}/x/profile`)).json()).toEqual({ name: 'Jane' });
+    await fetch(`${base}/flows/edit/calls/1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ responseBody: { name: 'EDITED' } }),
+    });
+    expect(await (await fetch(`http://127.0.0.1:${status.port}/x/profile`)).json()).toEqual({ name: 'EDITED' });
+  });
+
+  test('unknown seq → 404; invalid json → 400', async () => {
+    await save();
+    expect((await fetch(`${base}/flows/edit/calls/999`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(404);
+    expect((await fetch(`${base}/flows/edit/calls/1`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{ bad' })).status).toBe(400);
+  });
+});

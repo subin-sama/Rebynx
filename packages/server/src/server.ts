@@ -26,7 +26,7 @@ import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { deleteFlow, getFlow, listFlows, saveFlow } from './flows.js';
+import { deleteFlow, getFlow, listFlows, saveFlow, updateCall } from './flows.js';
 import type { FlowCall } from './flows.js';
 import { buildRoutes, createMockServer, type RouteMap } from './mock.js';
 
@@ -285,6 +285,33 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     return false;
   }
 
+  // PATCH /flows/:id/calls/:seq — edit a saved call's body/status in place. Lives
+  // here (not handleFlows) because it must rebuild a running mock's routes so the
+  // edit is served immediately.
+  async function handleFlowPatch(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
+    const m = url.pathname.match(/^\/flows\/([^/]+)\/calls\/([^/]+)$/);
+    if (!m) return false;
+    if (req.method !== 'PATCH') {
+      sendJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    let body: any;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'invalid json' });
+      return true;
+    }
+    const flow = await updateCall(flowsDir, decodeURIComponent(m[1]), Number(m[2]), body ?? {});
+    if (!flow) {
+      sendJson(res, 404, { error: 'not found' });
+      return true;
+    }
+    if (enabledFlows.size + enabledCalls.size > 0) await rebuildRoutes();
+    sendJson(res, 200, flow);
+    return true;
+  }
+
   const ring: unknown[] = [];
   const apps = new Set<WebSocket>();
   const browsers = new Set<WebSocket>();
@@ -300,6 +327,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
 
     try {
       if (await handleMock(req, res, url)) return;
+      if (await handleFlowPatch(req, res, url)) return;
       if (await handleFlows(req, res, url, flowsDir)) return;
     } catch {
       sendJson(res, 500, { error: 'internal error' });
