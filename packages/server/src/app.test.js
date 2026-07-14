@@ -432,6 +432,65 @@ describe('Flows — mock server', () => {
   });
 });
 
+describe('Flows — save/delete without native dialogs (Electron-safe)', () => {
+  beforeEach(setupDom);
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  test('Save flow shows an in-app name modal (not window.prompt) and posts the name', async () => {
+    const posts = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'POST' && url === '/flows') {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 201, json: async () => ({ id: 'my-flow', name: JSON.parse(opts.body).name }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    };
+    const app = createApp(document);
+    app.ingest(netEvent(1)); // a captured network call to save
+    const p = app.saveFlow();
+    await flush();
+    const input = document.querySelector('.modal-overlay .modal-input');
+    expect(input).toBeTruthy(); // an in-app modal, not window.prompt()
+    input.value = 'My Flow';
+    document.querySelector('.modal-overlay .modal-ok').click();
+    await p;
+    expect(posts[0].name).toBe('My Flow');
+    expect(document.querySelector('.modal-overlay')).toBeNull(); // modal closed after save
+  });
+
+  test('cancelling the name modal does not post', async () => {
+    let posted = false;
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'POST') posted = true;
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    };
+    const app = createApp(document);
+    app.ingest(netEvent(1));
+    const p = app.saveFlow();
+    await flush();
+    document.querySelector('.modal-overlay .modal-cancel').click();
+    await p;
+    expect(posted).toBe(false);
+    expect(document.querySelector('.modal-overlay')).toBeNull();
+  });
+
+  test('Delete flow uses an in-app confirm modal (not window.confirm)', async () => {
+    const dels = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'DELETE') { dels.push(url); return Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true }) }); }
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    };
+    const app = createApp(document);
+    const p = app.removeFlow('my-flow');
+    await flush();
+    const ok = document.querySelector('.modal-overlay .modal-ok');
+    expect(ok).toBeTruthy(); // an in-app confirm modal
+    ok.click();
+    await p;
+    expect(dels.some((u) => u.includes('/flows/my-flow'))).toBe(true);
+  });
+});
+
 describe('bounded history (perf)', () => {
   beforeEach(setupDom);
 

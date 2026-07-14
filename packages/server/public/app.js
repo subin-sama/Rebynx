@@ -537,6 +537,42 @@ export function createApp(doc = globalThis.document) {
     flash._t = setTimeout(() => el.classList.remove('on'), 2500);
   }
 
+  // In-app dialogs. Electron's BrowserWindow does NOT implement window.prompt()
+  // (it returns null), so a prompt-based Save silently fails in the desktop app.
+  // These portable modals work in the browser AND Electron (and are testable).
+  function askModal({ message, withInput, def = '', okLabel }) {
+    return new Promise((resolve) => {
+      const overlay = doc.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal">
+        <div class="modal-msg"></div>
+        ${withInput ? '<input class="modal-input" />' : ''}
+        <div class="modal-btns">
+          <button class="modal-cancel" type="button">Cancel</button>
+          <button class="modal-ok" type="button">${esc(okLabel)}</button>
+        </div>
+      </div>`;
+      overlay.querySelector('.modal-msg').textContent = message;
+      const input = overlay.querySelector('.modal-input');
+      if (input) input.value = def;
+      doc.body.appendChild(overlay);
+      if (input && input.focus) { input.focus(); if (input.select) input.select(); }
+      const close = (result) => { overlay.remove(); resolve(result); };
+      const ok = () => close(withInput ? (input.value.trim() || null) : true);
+      const cancel = () => close(withInput ? null : false);
+      overlay.querySelector('.modal-ok').addEventListener('click', ok);
+      overlay.querySelector('.modal-cancel').addEventListener('click', cancel);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) cancel(); });
+      if (input) input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') ok();
+        else if (e.key === 'Escape') cancel();
+      });
+    });
+  }
+
+  const askName = (message, def = '') => askModal({ message, withInput: true, def, okLabel: 'Save' });
+  const askConfirm = (message) => askModal({ message, withInput: false, okLabel: 'Delete' });
+
   function buildFlowCalls() {
     return events
       .filter((e) => e.type === 'network')
@@ -554,7 +590,7 @@ export function createApp(doc = globalThis.document) {
       alert('No network calls to save. Drive a flow first (Clear, then play).');
       return;
     }
-    const name = prompt(`Save ${calls.length} network call(s) as a flow named:`);
+    const name = await askName(`Save ${calls.length} network call(s) as a flow named:`);
     if (!name || !name.trim()) return;
     try {
       const res = await fetch('/flows', {
@@ -590,7 +626,7 @@ export function createApp(doc = globalThis.document) {
   }
 
   async function removeFlow(id) {
-    if (!confirm('Delete this flow?')) return;
+    if (!(await askConfirm('Delete this flow?'))) return;
     try { await fetch('/flows/' + encodeURIComponent(id), { method: 'DELETE' }); } catch {}
     if (flowDetail && flowDetail.id === id) flowDetail = null;
     loadFlows();
@@ -886,6 +922,8 @@ export function createApp(doc = globalThis.document) {
     toggleFlowMock,
     toggleCallMock,
     stopMock,
+    saveFlow,
+    removeFlow,
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
     get statePaused() { return statePaused; },

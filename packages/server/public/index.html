@@ -148,6 +148,15 @@
       .mock-stop { padding: 2px 12px; font-size: 11px; }
       .mock-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 
+      /* In-app modal (portable name prompt / confirm — Electron has no window.prompt) */
+      .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; z-index: 100; animation: fade-in 0.12s ease-out; }
+      .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: min(420px, 90vw); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+      .modal-msg { color: var(--text); margin-bottom: 10px; }
+      .modal-input { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: 13px; outline: none; }
+      .modal-input:focus { border-color: var(--accent); }
+      .modal-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+      .modal-ok { border-color: var(--accent); color: var(--accent); }
+
       /* JSON viewer: a titled, copyable, syntax-highlighted panel */
       .json-block { margin: 6px 0 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--panel-2); }
       .json-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px 4px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
