@@ -24,8 +24,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import type { AddressInfo } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
 import { deleteFlow, getFlow, listFlows, saveFlow } from './flows.js';
+import type { FlowCall } from './flows.js';
+import { buildRoutes, createMockServer, type RouteMap } from './mock.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RING_SIZE = 500;
@@ -147,6 +150,8 @@ export interface RelayOptions {
   flowsDir?: string;
   /** Where the browser client is served from. Defaults to DEFAULT_PUBLIC_DIR. */
   publicDir?: string;
+  /** Port for the mock API server. Defaults to DEVTOOLS_MOCK_PORT or 9091. */
+  mockPort?: number;
 }
 
 /** Build the relay http.Server (with WebSocket relay attached). Does not listen. */
@@ -154,6 +159,131 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
   const flowsDir = opts.flowsDir ?? DEFAULT_FLOWS_DIR;
   const publicDir = opts.publicDir ?? DEFAULT_PUBLIC_DIR;
   fs.mkdirSync(flowsDir, { recursive: true });
+
+  // ---- mock API server: replay a composable set of saved flows/calls ----
+  const mockPort = opts.mockPort ?? (process.env.DEVTOOLS_MOCK_PORT ? Number(process.env.DEVTOOLS_MOCK_PORT) : 9091);
+  const enabledFlows = new Set<string>();
+  const enabledCalls = new Set<string>(); // "flowId#seq"
+  let mockServer: http.Server | null = null;
+  let mockRoutes: RouteMap = {};
+  let activePort = mockPort;
+
+  // Resolve the enabled sources from disk into a grouped route map. Flow calls
+  // then individually-enabled calls, deduped by flowId#seq (sequence merge).
+  async function rebuildRoutes(): Promise<void> {
+    const calls: FlowCall[] = [];
+    const seen = new Set<string>();
+    const add = (flowId: string, c: FlowCall) => {
+      const k = `${flowId}#${c.seq}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      calls.push(c);
+    };
+    for (const fid of enabledFlows) {
+      const flow = await getFlow(flowsDir, fid);
+      if (flow) for (const c of flow.calls) add(fid, c);
+    }
+    for (const ck of enabledCalls) {
+      const [fid, seqStr] = ck.split('#');
+      const flow = await getFlow(flowsDir, fid);
+      const c = flow?.calls.find((x) => String(x.seq) === seqStr);
+      if (c) add(fid, c);
+    }
+    mockRoutes = buildRoutes(calls);
+  }
+
+  // Rebuild routes and start/stop the mock server to match the registry.
+  async function syncMock(): Promise<void> {
+    await rebuildRoutes();
+    const shouldRun = enabledFlows.size + enabledCalls.size > 0;
+    if (shouldRun && !mockServer) {
+      mockServer = createMockServer(() => mockRoutes);
+      await new Promise<void>((resolve) => mockServer!.listen(mockPort, '0.0.0.0', () => resolve()));
+      activePort = (mockServer.address() as AddressInfo).port;
+    } else if (!shouldRun && mockServer) {
+      await new Promise<void>((resolve) => mockServer!.close(() => resolve()));
+      mockServer = null;
+    }
+  }
+
+  function mockStatus() {
+    const endpoints = Object.entries(mockRoutes).map(([k, list]) => {
+      const sp = k.indexOf(' ');
+      return { method: k.slice(0, sp), path: k.slice(sp + 1), count: list.length };
+    });
+    const port = mockServer ? activePort : mockPort;
+    return {
+      active: !!mockServer,
+      port,
+      url: `http://${lanIp()}:${port}`,
+      flows: [...enabledFlows],
+      calls: [...enabledCalls],
+      endpoints,
+    };
+  }
+
+  /**
+   * Control API for the mock server. Returns true when it owns the request.
+   *
+   *   GET    /mock                     -> status
+   *   DELETE /mock                     -> clear + stop
+   *   POST   /mock/flow/:id            -> enable a whole flow
+   *   DELETE /mock/flow/:id            -> disable a whole flow
+   *   POST   /mock/call/:flowId/:seq   -> enable one call
+   *   DELETE /mock/call/:flowId/:seq   -> disable one call
+   */
+  async function handleMock(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
+    if (url.pathname === '/mock') {
+      if (req.method === 'GET') { sendJson(res, 200, mockStatus()); return true; }
+      if (req.method === 'DELETE') {
+        enabledFlows.clear();
+        enabledCalls.clear();
+        await syncMock();
+        sendJson(res, 200, mockStatus());
+        return true;
+      }
+      sendJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    const flow = url.pathname.match(/^\/mock\/flow\/([^/]+)$/);
+    if (flow) {
+      const id = decodeURIComponent(flow[1]);
+      if (req.method === 'POST') {
+        if (!(await getFlow(flowsDir, id))) { sendJson(res, 404, { error: 'flow not found' }); return true; }
+        enabledFlows.add(id);
+        await syncMock();
+        sendJson(res, 200, mockStatus());
+        return true;
+      }
+      if (req.method === 'DELETE') {
+        enabledFlows.delete(id);
+        await syncMock();
+        sendJson(res, 200, mockStatus());
+        return true;
+      }
+    }
+    const one = url.pathname.match(/^\/mock\/call\/([^/]+)\/([^/]+)$/);
+    if (one) {
+      const fid = decodeURIComponent(one[1]);
+      const seq = decodeURIComponent(one[2]);
+      const key = `${fid}#${seq}`;
+      if (req.method === 'POST') {
+        const f = await getFlow(flowsDir, fid);
+        if (!f || !f.calls.some((c) => String(c.seq) === seq)) { sendJson(res, 404, { error: 'call not found' }); return true; }
+        enabledCalls.add(key);
+        await syncMock();
+        sendJson(res, 200, mockStatus());
+        return true;
+      }
+      if (req.method === 'DELETE') {
+        enabledCalls.delete(key);
+        await syncMock();
+        sendJson(res, 200, mockStatus());
+        return true;
+      }
+    }
+    return false;
+  }
 
   const ring: unknown[] = [];
   const apps = new Set<WebSocket>();
@@ -169,6 +299,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
     try {
+      if (await handleMock(req, res, url)) return;
       if (await handleFlows(req, res, url, flowsDir)) return;
     } catch {
       sendJson(res, 500, { error: 'internal error' });
@@ -258,6 +389,9 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
       if (wasApp) broadcastPresence();
     });
   });
+
+  // Tear down the mock server alongside the relay (keeps tests/ports clean).
+  server.on('close', () => { if (mockServer) mockServer.close(); });
 
   return server;
 }

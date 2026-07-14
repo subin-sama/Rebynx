@@ -29,7 +29,7 @@ let flowsDir: string;
 
 beforeEach(async () => {
   flowsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rebynx-http-'));
-  server = createRelayServer({ flowsDir });
+  server = createRelayServer({ flowsDir, mockPort: 0 });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   base = `http://127.0.0.1:${port}`;
@@ -202,5 +202,52 @@ describe('connection info + presence', () => {
     expect(firstPresence).toBe(1);
     appWs.close();
     browser.close();
+  });
+});
+
+describe('/mock (serve saved flows as an API)', () => {
+  async function saveSample() {
+    await fetch(`${base}/flows`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'login',
+        calls: [
+          { seq: 1, method: 'GET', url: 'https://api/x/profile', status: 200, request: {}, response: { headers: {}, body: { name: 'Jane' } } },
+          { seq: 2, method: 'POST', url: 'https://api/x/logout', status: 204, request: {}, response: { headers: {}, body: null } },
+        ],
+      }),
+    });
+  }
+
+  test('enabling a whole flow serves its endpoints', async () => {
+    await saveSample();
+    const status: any = await (await fetch(`${base}/mock/flow/login`, { method: 'POST' })).json();
+    expect(status.active).toBe(true);
+    expect(status.flows).toContain('login');
+    expect(status.endpoints.map((e: any) => e.path).sort()).toEqual(['/x/logout', '/x/profile']);
+    const hit = await fetch(`http://127.0.0.1:${status.port}/x/profile`);
+    expect(await hit.json()).toEqual({ name: 'Jane' });
+  });
+
+  test('enabling a single call serves only that endpoint', async () => {
+    await saveSample();
+    const status: any = await (await fetch(`${base}/mock/call/login/1`, { method: 'POST' })).json();
+    expect(status.calls).toContain('login#1');
+    expect(status.endpoints.map((e: any) => e.path)).toEqual(['/x/profile']);
+  });
+
+  test('GET /mock reports current state; DELETE /mock clears + stops', async () => {
+    await saveSample();
+    await fetch(`${base}/mock/flow/login`, { method: 'POST' });
+    const now: any = await (await fetch(`${base}/mock`)).json();
+    expect(now.active).toBe(true);
+    const cleared: any = await (await fetch(`${base}/mock`, { method: 'DELETE' })).json();
+    expect(cleared.active).toBe(false);
+    expect(cleared.flows).toEqual([]);
+  });
+
+  test('enabling a missing flow is 404', async () => {
+    expect((await fetch(`${base}/mock/flow/nope`, { method: 'POST' })).status).toBe(404);
   });
 });

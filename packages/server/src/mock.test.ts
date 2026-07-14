@@ -74,7 +74,8 @@ describe('createMockServer', () => {
     try {
       const res = await fetch(`${base}/missing`);
       expect(res.status).toBe(404);
-      expect((await res.json()).method).toBe('GET');
+      const body: any = await res.json();
+      expect(body.method).toBe('GET');
     } finally {
       await new Promise((r) => server.close(r));
     }
