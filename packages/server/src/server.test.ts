@@ -4,7 +4,24 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { WebSocket } from 'ws';
 import { createRelayServer } from './server.js';
+
+function openWs(url: string): Promise<WebSocket> {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    ws.once('open', () => resolve(ws));
+    ws.once('error', reject);
+  });
+}
+
+async function waitFor(pred: () => boolean, ms = 1000) {
+  const start = Date.now();
+  while (!pred()) {
+    if (Date.now() - start > ms) throw new Error('waitFor timed out');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
 let server: Server;
 let base: string;
@@ -131,5 +148,59 @@ describe('fall-through', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('id="save-flow"');
+  });
+});
+
+describe('connection info + presence', () => {
+  test('GET /info returns the LAN address and a live app count', async () => {
+    const res = await fetch(`${base}/info`);
+    expect(res.status).toBe(200);
+    const info: any = await res.json();
+    expect(typeof info.lanIp).toBe('string');
+    expect(info.lanIp.length).toBeGreaterThan(0);
+    expect(info.apps).toBe(0);
+  });
+
+  test('broadcasts presence to browsers when an app connects then disconnects', async () => {
+    const wsUrl = base.replace('http', 'ws');
+    const browser = await openWs(wsUrl);
+    const seen: number[] = [];
+    browser.on('message', (d) => {
+      const m = JSON.parse(d.toString());
+      if (m.kind === 'presence' && typeof m.apps === 'number') seen.push(m.apps);
+    });
+    browser.send(JSON.stringify({ kind: 'hello', role: 'browser' }));
+
+    const appWs = await openWs(wsUrl);
+    appWs.send(JSON.stringify({ kind: 'hello', role: 'app' }));
+    await waitFor(() => seen.includes(1));
+
+    appWs.close();
+    await waitFor(() => seen[seen.length - 1] === 0);
+
+    browser.close();
+    expect(seen).toContain(1);
+    expect(seen[seen.length - 1]).toBe(0);
+  });
+
+  test('sends a browser the current app count right after it says hello', async () => {
+    const wsUrl = base.replace('http', 'ws');
+    // an app is already connected
+    const appWs = await openWs(wsUrl);
+    appWs.send(JSON.stringify({ kind: 'hello', role: 'app' }));
+    await new Promise((r) => setTimeout(r, 30));
+
+    const browser = await openWs(wsUrl);
+    let firstPresence = -1;
+    browser.on('message', (d) => {
+      const m = JSON.parse(d.toString());
+      if (m.kind === 'presence' && firstPresence < 0) firstPresence = m.apps;
+    });
+    browser.send(JSON.stringify({ kind: 'hello', role: 'browser' }));
+    await waitFor(() => firstPresence >= 0);
+
+    expect(firstPresence).toBe(1);
+    appWs.close();
+    browser.close();
   });
 });

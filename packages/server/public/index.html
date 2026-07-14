@@ -137,12 +137,29 @@
       .j-num { color: var(--yellow); }
       .j-bool { color: var(--purple); }
       .j-null { color: var(--muted); }
+
+      /* Connection status pill + Setup tab */
+      .app-status { color: var(--muted); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+      .app-status.on { color: var(--green); }
+      .setup { padding: 14px 16px; max-width: 760px; }
+      .setup-banner { padding: 10px 12px; border-radius: 6px; margin-bottom: 14px; border: 1px solid var(--border); font-weight: 600; }
+      .setup-banner.wait { color: var(--yellow); }
+      .setup-banner.ok { color: var(--green); border-color: var(--green); }
+      .setup-label { color: var(--muted); margin: 14px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+      .setup-note { color: var(--muted); margin-top: 16px; line-height: 1.6; }
+      .setup-note code { color: var(--text); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+      .state-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+      .state-opt { padding: 3px 10px; font-size: 11px; border-radius: 6px; }
+      .state-opt.active { border-color: var(--accent); color: var(--accent); }
+      .setup-hint { color: var(--muted); margin-top: 8px; font-size: 11px; line-height: 1.5; }
+      .setup-hint code { color: var(--text); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
     </style>
   </head>
   <body>
     <header>
       <span class="title">Rebynx</span>
       <span class="conn"><span class="dot" id="dot"></span><span id="conn-text">connecting…</span></span>
+      <span class="app-status" id="app-status">○ waiting for app</span>
       <input id="filter" placeholder="filter…" />
       <button id="save-flow">Save flow</button>
       <button id="clear">Clear</button>

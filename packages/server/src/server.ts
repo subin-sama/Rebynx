@@ -20,6 +20,7 @@
  */
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +29,17 @@ import { deleteFlow, getFlow, listFlows, saveFlow } from './flows.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RING_SIZE = 500;
+
+/** First non-internal IPv4 address a device/emulator should dial, else 'localhost'. */
+export function lanIp(): string {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name] ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
+}
 
 export const DEFAULT_PUBLIC_DIR = path.join(__dirname, '..', 'public');
 export const DEFAULT_FLOWS_DIR = process.env.DEVTOOLS_FLOWS_DIR ?? path.join(__dirname, '..', 'flows');
@@ -147,6 +159,12 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
   const apps = new Set<WebSocket>();
   const browsers = new Set<WebSocket>();
 
+  // Tell every browser how many apps are currently connected (Setup tab status).
+  const broadcastPresence = () => {
+    const msg = JSON.stringify({ kind: 'presence', apps: apps.size });
+    for (const b of browsers) if (b.readyState === b.OPEN) b.send(msg);
+  };
+
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
 
@@ -154,6 +172,12 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
       if (await handleFlows(req, res, url, flowsDir)) return;
     } catch {
       sendJson(res, 500, { error: 'internal error' });
+      return;
+    }
+
+    // Connection info for the client's Setup tab (LAN address + live app count).
+    if (url.pathname === '/info') {
+      sendJson(res, 200, { lanIp: lanIp(), apps: apps.size });
       return;
     }
 
@@ -202,12 +226,15 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
         case 'hello': {
           if (msg.role === 'app') {
             apps.add(ws);
+            broadcastPresence();
           } else {
             browsers.add(ws);
             // Replay history to the freshly-connected browser.
             for (const event of ring) {
               if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ kind: 'event', event }));
             }
+            // Give the new browser the current app count immediately.
+            broadcastPresence();
           }
           break;
         }
@@ -226,8 +253,9 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     });
 
     ws.on('close', () => {
-      apps.delete(ws);
+      const wasApp = apps.delete(ws);
       browsers.delete(ws);
+      if (wasApp) broadcastPresence();
     });
   });
 

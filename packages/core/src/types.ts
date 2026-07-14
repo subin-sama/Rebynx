@@ -103,4 +103,5 @@ export interface Plugin {
 export type WireMessage =
   | { kind: 'hello'; role: 'app' | 'browser' }
   | { kind: 'event'; event: DevEvent }
-  | { kind: 'command'; command: DevCommand };
+  | { kind: 'command'; command: DevCommand }
+  | { kind: 'presence'; apps: number };

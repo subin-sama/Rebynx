@@ -100,11 +100,31 @@ npx @rebynx/server
 # ▸ app connects to: ws://<your-machine-ip>:9090
 ```
 
-Open http://localhost:9090. Click a **source link** in the inspect tab and the
-file opens in your editor (jump-to-code). Configurable port via `DEVTOOLS_PORT`.
+Open http://localhost:9090. It lands on a **Setup** tab with copy-paste connect
+steps, the `ws://<LAN-IP>:9090` to point your app at, and a live status that flips
+from *waiting for app* to *app connected* the moment your app dials in. Click a
+**source link** in the inspect tab and the file opens in your editor
+(jump-to-code). Configurable port via `DEVTOOLS_PORT`.
 
 > **Android emulator** can't reach `localhost` — use `ws://10.0.2.2:9090`.
 > **Physical device** — use your machine's LAN IP.
+
+## Desktop app (no terminal)
+
+`packages/desktop` wraps the relay + browser client in one Electron window, so
+there's nothing to run by hand — the relay starts inside the app (or reuses one
+already on `:9090`), and the window's title bar shows the `ws://<LAN-IP>:9090`
+your RN app should dial.
+
+```bash
+npm install
+npm run app                # launch the window (dev)
+npm run app:launcher       # build a double-clickable Rebynx.app in ~/Applications
+npm run app:dist           # build a self-contained Rebynx.app/.dmg (electron-builder)
+```
+
+`app:launcher` is a lightweight wrapper around the repo's Electron (fast, tied to
+this checkout); `app:dist` produces a portable, self-contained bundle.
 
 ## Save a network flow
 

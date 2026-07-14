@@ -27,7 +27,11 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
   `app.test.js` can drive it under happy-dom. The client renders **incrementally**
   (append/patch one row per event) rather than rebuilding `#main`, so an open
   `<details>` payload or a text selection survives the next incoming event; JSON
-  panels are syntax-highlighted and copyable (`<pre>` text is the raw JSON).
+  panels are syntax-highlighted and copyable (`<pre>` text is the raw JSON). The
+  default **Setup** tab shows copy-paste connect steps + the `ws://<LAN-IP>:9090`
+  to dial and a Reactotron-style live status (`GET /info` gives the LAN address;
+  the relay broadcasts `{ kind: 'presence', apps }` to browsers so "waiting for
+  app" flips to "app connected").
   - `server.ts` — `createRelayServer({ flowsDir?, publicDir? })` builds the
     configured http.Server (routes + WebSocket relay) but **does not listen**, so
     `server.test.ts` can boot it on an ephemeral port. `index.ts` is the thin
@@ -42,6 +46,13 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
     Blob), so a flow can be imported into `api-ui-mapper` as mock overrides.
 - **`packages/rn`** — `initDevTools()` wiring + `<DevToolsOverlay/>` (draggable
   bubble → tabbed mini panel). Reads from `memorySink`.
+- **`packages/desktop`** — Electron wrapper so there's nothing to run by hand.
+  `main.mjs` starts the relay in Electron's Node main via `createRelayServer()`
+  from `@rebynx/server/server` (or reuses one already on `:9090` — see
+  `lib/net-util.mjs` `portInUse`), then `loadURL('http://localhost:9090')` so the
+  existing client works unchanged. `npm run app` launches it; `scripts/make-launcher.mjs`
+  (`npm run app:launcher`) writes a lightweight double-click `Rebynx.app`;
+  `npm run app:dist` builds a self-contained bundle via electron-builder.
 
 ## How each RN DevTools pain is addressed
 

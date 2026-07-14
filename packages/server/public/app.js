@@ -8,6 +8,88 @@ export const PLUGINS = [
   { id: 'inspect', label: 'Inspect', accepts: (e) => e.type === 'inspect' },
 ];
 
+// How to wire each state manager into the State tab (shown in the Setup tab).
+// Console + network hook automatically; state must be connected explicitly, so
+// these snippets tell you exactly how — always with the SAME `devtoolsHub`.
+export const STATE_SNIPPETS = [
+  {
+    id: 'redux',
+    label: 'Redux / Saga',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { createReduxMiddleware } from '@rebynx/core';
+
+// RTK — add next to your saga middleware:
+const store = configureStore({
+  reducer: rootReducer,
+  middleware: (getDefault) =>
+    getDefault().concat(sagaMiddleware, createReduxMiddleware(devtoolsHub)),
+});
+sagaMiddleware.run(rootSaga);
+
+// plain redux:
+//   createStore(rootReducer,
+//     applyMiddleware(sagaMiddleware, createReduxMiddleware(devtoolsHub)));`,
+  },
+  {
+    id: 'zustand',
+    label: 'Zustand',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackZustand } from '@rebynx/core';
+
+trackZustand(devtoolsHub, useBearStore, 'bear');
+// or at init:  initDevTools({ url, zustand: { bear: useBearStore } });`,
+  },
+  {
+    id: 'mmkv',
+    label: 'MMKV',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackMMKV } from '@rebynx/core';
+import { storage } from './mmkv'; // your MMKV instance
+
+trackMMKV(devtoolsHub, storage, 'mmkv');`,
+  },
+  {
+    id: 'async',
+    label: 'AsyncStorage',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackAsyncStorage } from '@rebynx/core';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+trackAsyncStorage(devtoolsHub, AsyncStorage, 'async-storage');`,
+  },
+  {
+    id: 'jotai',
+    label: 'Jotai',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackJotai } from '@rebynx/core';
+import { getDefaultStore } from 'jotai';
+
+trackJotai(devtoolsHub, getDefaultStore(), { count: countAtom, user: userAtom }, 'jotai');`,
+  },
+  {
+    id: 'mobx',
+    label: 'MobX',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackMobX } from '@rebynx/core';
+import { toJS, autorun } from 'mobx';
+
+trackMobX(devtoolsHub, myObservableState, toJS, autorun, 'mobx');`,
+  },
+  {
+    id: 'custom',
+    label: 'Custom',
+    code: `import { devtoolsHub } from '@rebynx/rn';
+import { trackStore } from '@rebynx/core';
+
+// any store with a snapshot + a change subscription:
+trackStore(devtoolsHub, {
+  name: 'cart',
+  getState: () => cart.value,
+  subscribe: (cb) => cart.onChange(cb),
+});`,
+  },
+];
+
 export const esc = (s) =>
   String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -112,13 +194,16 @@ export function createApp(doc = globalThis.document) {
   const $ = (id) => doc.getElementById(id);
   const main = () => $('main');
 
-  let active = 'logs';
+  let active = 'setup';       // land on the Setup/connect tab
   let filter = '';
   const events = [];
   const netIndex = new Map(); // reqId -> merged network row (data)
   const netNodes = new Map(); // reqId -> row element (DOM), for in-place updates
   let flowList = [];
   let flowDetail = null;
+  let appsConnected = 0;      // RN apps currently connected to the relay
+  let lanInfo = { lanIp: null };
+  let stateAdapter = 'redux'; // which state-manager snippet the Setup tab shows
   let ws;
 
   const matches = (e) => !filter || JSON.stringify(e).toLowerCase().includes(filter);
@@ -128,14 +213,16 @@ export function createApp(doc = globalThis.document) {
       const n = events.filter((e) => p.accepts(e)).length;
       return `<div class="tab ${p.id === active ? 'active' : ''}" data-tab="${p.id}">${p.label} <span class="count">${n}</span></div>`;
     }).join('');
+    const setupTab = `<div class="tab ${active === 'setup' ? 'active' : ''}" data-tab="setup">Setup</div>`;
     const flowsTab = `<div class="tab ${active === 'flows' ? 'active' : ''}" data-tab="flows">Flows <span class="count">${flowList.length}</span></div>`;
-    $('tabs').innerHTML = pluginTabs + flowsTab;
+    $('tabs').innerHTML = setupTab + pluginTabs + flowsTab;
   }
 
   // Full rebuild of #main for the active tab. Used on tab switch / filter /
   // clear / flow nav — NOT on every incoming event (that's what append is for).
   function fullRender() {
     renderTabs();
+    if (active === 'setup') return renderSetup();
     if (active === 'flows') return renderFlows();
     netNodes.clear();
     const el = main();
@@ -157,7 +244,7 @@ export function createApp(doc = globalThis.document) {
   // single row without touching existing rows — so an open <details> or a text
   // selection the user is reading/copying survives the next event.
   function liveRow(e) {
-    if (active === 'flows') return;
+    if (active === 'setup' || active === 'flows') return;
     const plugin = PLUGINS.find((p) => p.id === active);
     if (!plugin.accepts(e) || !matches(e)) return;
 
@@ -371,6 +458,92 @@ export function createApp(doc = globalThis.document) {
     }
   }
 
+  // ---- setup / connection ----
+  // A copyable plain-text block (reuses the .json-block chrome; the <pre> text is
+  // the raw content so copyFrom yields it verbatim).
+  function codeBlock(label, text) {
+    return `<div class="json-block">
+      <div class="json-bar"><span class="json-label">${esc(label)}</span><button class="copy-btn" type="button">Copy</button></div>
+      <pre>${esc(text)}</pre>
+    </div>`;
+  }
+
+  function connectUrl() {
+    const host = lanInfo.lanIp || location.hostname || 'localhost';
+    const port = location.port || '9090';
+    return `ws://${host}:${port}`;
+  }
+
+  function updateAppStatus() {
+    const el = $('app-status');
+    if (!el) return;
+    if (appsConnected > 0) {
+      el.textContent = `● ${appsConnected} app${appsConnected > 1 ? 's' : ''} connected`;
+      el.className = 'app-status on';
+    } else {
+      el.textContent = '○ waiting for app';
+      el.className = 'app-status';
+    }
+  }
+
+  function renderSetupBanner(el) {
+    if (!el) return;
+    if (appsConnected > 0) {
+      el.className = 'setup-banner ok';
+      el.textContent = `✓ ${appsConnected} app${appsConnected > 1 ? 's' : ''} connected`;
+    } else {
+      el.className = 'setup-banner wait';
+      el.textContent = 'Waiting for your app to connect…';
+    }
+  }
+
+  function renderSetup() {
+    const url = connectUrl();
+    const port = location.port || '9090';
+    main().innerHTML = `
+      <div class="setup">
+        <div class="setup-banner" id="setup-banner"></div>
+        <div class="setup-label">Point your React Native app here</div>
+        ${codeBlock('WebSocket URL', url)}
+        <div class="setup-label">1 · Install</div>
+        ${codeBlock('shell', 'npm i -D @rebynx/rn')}
+        <div class="setup-label">2 · Wire it up — top of your entry file</div>
+        ${codeBlock('index.js', `import { initDevTools, DevToolsOverlay } from '@rebynx/rn';\n\nif (__DEV__) {\n  initDevTools({ url: '${url}' });\n}\n\n// render <DevToolsOverlay/> once at your app root`)}
+        <div class="setup-label">3 · Inspect your state — optional (logs + network need nothing)</div>
+        <div class="state-picker">
+          ${STATE_SNIPPETS.map((s) => `<button class="state-opt ${s.id === stateAdapter ? 'active' : ''}" data-adapter="${s.id}">${esc(s.label)}</button>`).join('')}
+        </div>
+        ${codeBlock('store setup', (STATE_SNIPPETS.find((s) => s.id === stateAdapter) || STATE_SNIPPETS[0]).code)}
+        <div class="setup-hint">Must use the same <code>devtoolsHub</code> from <code>@rebynx/rn</code> — a fresh <code>Hub</code> won't reach the relay, so State stays empty.</div>
+        <div class="setup-note">Android emulator can't reach your LAN IP — use <code>ws://10.0.2.2:${esc(port)}</code>. A physical device uses the LAN address above (same Wi-Fi).</div>
+      </div>`;
+    renderSetupBanner($('setup-banner'));
+  }
+
+  function selectStateAdapter(id) {
+    if (STATE_SNIPPETS.some((s) => s.id === id)) stateAdapter = id;
+    if (active === 'setup') renderSetup();
+  }
+
+  function handlePresence(apps) {
+    if (typeof apps !== 'number') return;
+    appsConnected = apps;
+    updateAppStatus();
+    renderSetupBanner($('setup-banner'));
+  }
+
+  function handleInfo(info) {
+    if (info && typeof info.lanIp === 'string') lanInfo.lanIp = info.lanIp;
+    if (info && typeof info.apps === 'number') appsConnected = info.apps;
+    updateAppStatus();
+    if (active === 'setup') renderSetup();
+  }
+
+  async function loadInfo() {
+    try { handleInfo(await (await fetch('/info')).json()); }
+    catch { handleInfo({ lanIp: location.hostname }); }
+  }
+
   // ---- DOM wiring + socket (browser only) ----
   function start() {
     $('tabs').addEventListener('click', (ev) => {
@@ -381,6 +554,8 @@ export function createApp(doc = globalThis.document) {
     $('filter').addEventListener('input', (ev) => setFilter(ev.target.value));
     $('clear').addEventListener('click', clearAll);
     main().addEventListener('click', (ev) => {
+      const stateOpt = ev.target.closest('.state-opt');
+      if (stateOpt) { ev.stopPropagation(); selectStateAdapter(stateOpt.dataset.adapter); return; }
       const copyBtn = ev.target.closest('.copy-btn');
       if (copyBtn) { ev.stopPropagation(); copyFrom(copyBtn); return; }
       const exp = ev.target.closest('.flow-export');
@@ -397,6 +572,7 @@ export function createApp(doc = globalThis.document) {
 
     connect();
     fullRender();
+    loadInfo();
     return controller;
   }
 
@@ -411,6 +587,7 @@ export function createApp(doc = globalThis.document) {
       try {
         const msg = JSON.parse(m.data);
         if (msg.kind === 'event') ingest(msg.event);
+        else if (msg.kind === 'presence') handlePresence(msg.apps);
       } catch {}
     };
     ws.onclose = () => {
@@ -434,8 +611,14 @@ export function createApp(doc = globalThis.document) {
     set flowList(v) { flowList = v; },
     get flowDetail() { return flowDetail; },
     set flowDetail(v) { flowDetail = v; },
+    get appsConnected() { return appsConnected; },
+    get stateAdapter() { return stateAdapter; },
     fullRender,
     copyFrom,
+    handleInfo,
+    handlePresence,
+    renderSetup,
+    selectStateAdapter,
   };
   return controller;
 }

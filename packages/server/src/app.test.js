@@ -3,10 +3,11 @@
 // Tests the browser client (public/app.js). Written in JS so it can import the
 // static client module directly; tsc ignores .js, vitest runs it.
 import { beforeEach, describe, expect, test } from 'vitest';
-import { createApp, syntaxHighlight, jsonBlock } from '../public/app.js';
+import { createApp, syntaxHighlight, jsonBlock, STATE_SNIPPETS } from '../public/app.js';
 
 function setupDom() {
-  document.body.innerHTML = `<div id="tabs"></div><main id="main"></main><span id="flash"></span>`;
+  document.body.innerHTML =
+    `<span id="app-status"></span><div id="tabs"></div><main id="main"></main><span id="flash"></span>`;
 }
 
 const netEvent = (n, extra = {}) => ({
@@ -101,5 +102,99 @@ describe('incremental rendering', () => {
     // tab counts reflect both events
     expect(document.querySelector('.tab[data-tab="logs"] .count').textContent).toBe('1');
     expect(document.querySelector('.tab[data-tab="network"] .count').textContent).toBe('1');
+  });
+});
+
+describe('setup / connection', () => {
+  beforeEach(setupDom);
+
+  test('lands on the Setup tab by default', () => {
+    const app = createApp(document);
+    expect(app.active).toBe('setup');
+  });
+
+  test('shows the connect URL and install steps with the LAN address', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '192.168.1.42', apps: 0 }); // sets info + renders (active is setup)
+
+    const text = document.getElementById('main').textContent;
+    expect(text).toContain('ws://192.168.1.42:'); // host = the relay's LAN address (port = location.port)
+    expect(text).toContain('npm i -D @rebynx/rn');
+    expect(text).toContain('initDevTools');
+
+    // the URL block is copyable — its <pre> text is exactly the URL
+    const pre = [...document.querySelectorAll('#main pre')].find((p) => p.textContent.startsWith('ws://'));
+    expect(pre.textContent).toMatch(/^ws:\/\/192\.168\.1\.42:\d+$/);
+  });
+
+  test('presence flips the header pill and the setup banner to connected', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '10.0.0.5', apps: 0 });
+    expect(document.getElementById('app-status').textContent).toContain('waiting');
+    expect(document.getElementById('setup-banner').textContent).toContain('Waiting');
+
+    app.handlePresence(2);
+    expect(app.appsConnected).toBe(2);
+    expect(document.getElementById('app-status').textContent).toContain('2 apps connected');
+    expect(document.getElementById('app-status').className).toContain('on');
+    expect(document.getElementById('setup-banner').textContent).toContain('2 app');
+  });
+
+  test('ignores a non-numeric presence value', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '10.0.0.5', apps: 1 });
+    app.handlePresence('nope');
+    expect(app.appsConnected).toBe(1);
+  });
+});
+
+describe('state-manager snippets', () => {
+  beforeEach(setupDom);
+
+  test('covers every shipped adapter, each wired through the shared devtoolsHub', () => {
+    const ids = STATE_SNIPPETS.map((s) => s.id);
+    expect(ids).toEqual(['redux', 'zustand', 'mmkv', 'async', 'jotai', 'mobx', 'custom']);
+    for (const s of STATE_SNIPPETS) {
+      expect(s.code).toContain("devtoolsHub");
+      expect(s.code).toContain("@rebynx/rn");
+    }
+    // each snippet references its adapter's API
+    const by = (id) => STATE_SNIPPETS.find((s) => s.id === id).code;
+    expect(by('redux')).toContain('createReduxMiddleware(devtoolsHub)');
+    expect(by('zustand')).toContain('trackZustand(devtoolsHub');
+    expect(by('mmkv')).toContain('trackMMKV(devtoolsHub');
+    expect(by('async')).toContain('trackAsyncStorage(devtoolsHub');
+    expect(by('jotai')).toContain('trackJotai(devtoolsHub');
+    expect(by('mobx')).toContain('trackMobX(devtoolsHub');
+    expect(by('custom')).toContain('trackStore(devtoolsHub');
+  });
+
+  test('Setup shows a picker for every adapter and the Redux snippet by default', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '10.0.0.5', apps: 0 });
+    expect(app.stateAdapter).toBe('redux');
+    const opts = [...document.querySelectorAll('#main .state-opt')].map((b) => b.dataset.adapter);
+    expect(opts).toEqual(['redux', 'zustand', 'mmkv', 'async', 'jotai', 'mobx', 'custom']);
+    expect(document.querySelector('#main .state-opt.active').dataset.adapter).toBe('redux');
+    expect(document.getElementById('main').textContent).toContain('createReduxMiddleware(devtoolsHub)');
+  });
+
+  test('picking an adapter swaps the shown snippet', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '10.0.0.5', apps: 0 });
+
+    app.selectStateAdapter('zustand');
+    expect(app.stateAdapter).toBe('zustand');
+    const text = document.getElementById('main').textContent;
+    expect(text).toContain('trackZustand(devtoolsHub');
+    expect(text).not.toContain('createReduxMiddleware');
+    expect(document.querySelector('#main .state-opt.active').dataset.adapter).toBe('zustand');
+  });
+
+  test('ignores an unknown adapter id', () => {
+    const app = createApp(document);
+    app.handleInfo({ lanIp: '10.0.0.5', apps: 0 });
+    app.selectStateAdapter('nope');
+    expect(app.stateAdapter).toBe('redux');
   });
 });
