@@ -26,6 +26,9 @@
     "install:rn-app": "npm run build:core && node scripts/install-rn-app.mjs",
     "server": "npm run start --workspace @rebynx/server",
     "server:dev": "npm run dev --workspace @rebynx/server",
+    "app": "npm run build && npm run start --workspace @rebynx/desktop",
+    "app:launcher": "npm run build && npm run app:launcher --workspace @rebynx/desktop",
+    "app:dist": "npm run build && npm run dist --workspace @rebynx/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run"
   },

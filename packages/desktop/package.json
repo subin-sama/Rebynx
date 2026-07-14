@@ -1,0 +1,34 @@
+{
+  "name": "@rebynx/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rebynx desktop app — the relay + browser client in one double-clickable window.",
+  "author": "Bynx",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac",
+    "app:launcher": "node scripts/make-launcher.mjs",
+    "typecheck": "true"
+  },
+  "dependencies": {
+    "@rebynx/server": "*"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.bynx.rebynx",
+    "productName": "Rebynx",
+    "electronVersion": "33.4.11",
+    "asar": true,
+    "directories": { "output": "release" },
+    "files": ["main.mjs", "lib/**/*", "package.json"],
+    "mac": {
+      "target": ["dir"],
+      "category": "public.app-category.developer-tools"
+    }
+  }
+}

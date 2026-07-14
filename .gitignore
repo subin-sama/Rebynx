@@ -35,3 +35,6 @@ Thumbs.db
 
 # Saved network flows (runtime data)
 packages/server/flows/
+
+# Electron desktop app build output
+packages/desktop/release/

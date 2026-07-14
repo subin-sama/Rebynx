@@ -13,6 +13,10 @@
   },
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./server": "./dist/server.js"
+  },
   "bin": {
     "rebynx-server": "./bin/cli.mjs"
   },
