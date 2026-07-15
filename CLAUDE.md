@@ -48,6 +48,10 @@ Collectors ─► Hub (ring buffer + fan-out) ─► Sinks ┬─ MemorySink  �
     routes on edit. Format is designed to also feed future replay + mock.
     The Flows tab has an **Export** button per flow (downloads the flow JSON via a
     Blob), so a flow can be imported into `api-ui-mapper` as mock overrides.
+    `mocksToFlow()` is the inverse: an **Import mocks** button (`POST /flows/import`)
+    turns an api-ui-mapper mock file (`{ [path]: { endpoint, statusCode, resBody } }`,
+    no method) into a flow; the mock matcher's **path-only fallback** lets those
+    (stored as GET) answer any method.
   - `mock.ts` — **replay saved flows as a live API**. `createMockServer(getRoutes)`
     is a second `http.Server` (port 9091, `DEVTOOLS_MOCK_PORT`) run in-process by
     the relay; it answers requests matched by **method + path** (query/host

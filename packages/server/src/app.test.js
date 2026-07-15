@@ -541,6 +541,34 @@ describe('Flows — save/delete without native dialogs (Electron-safe)', () => {
   });
 });
 
+describe('Flows — import mocks', () => {
+  beforeEach(setupDom);
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  test('the Flows list renders an Import button', async () => {
+    globalThis.fetch = () => Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    const app = createApp(document);
+    app.setActive('flows');
+    await flush();
+    expect(document.querySelector('#main .import-mocks')).toBeTruthy();
+  });
+
+  test('importMocks posts the mock map to /flows/import', async () => {
+    const posts = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'POST' && url === '/flows/import') {
+        posts.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, status: 201, json: async () => ({ name: 'aeoon', calls: [] }) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => [] });
+    };
+    const app = createApp(document);
+    await app.importMocks('aeoon', { '/api/x': { endpoint: '/api/x', statusCode: '200', resBody: '{}' } });
+    expect(posts[0].name).toBe('aeoon');
+    expect(posts[0].mocks['/api/x'].endpoint).toBe('/api/x');
+  });
+});
+
 describe('Flows — edit a call (payload/response/status)', () => {
   beforeEach(setupDom);
   const flush = () => new Promise((r) => setTimeout(r, 0));

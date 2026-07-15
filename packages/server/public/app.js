@@ -742,14 +742,55 @@ export function createApp(doc = globalThis.document) {
     </div>`;
   }
 
+  // Import an api-ui-mapper mock file ({ [path]: { endpoint, statusCode, resBody } })
+  // as a new flow, so the mock server can serve it.
+  async function importMocks(name, mocks) {
+    try {
+      const res = await fetch('/flows/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, mocks }),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const flow = await res.json();
+      flash(`Imported “${flow.name}” · ${(flow.calls || []).length} calls`);
+      if (active === 'flows') loadFlows();
+    } catch (err) {
+      alert('Could not import mocks: ' + err.message);
+    }
+  }
+
+  function openImportPicker() {
+    const input = doc.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      let mocks;
+      try {
+        mocks = JSON.parse(await file.text());
+      } catch {
+        alert('That file isn’t valid JSON.');
+        return;
+      }
+      const base = file.name.replace(/\.json$/i, '').replace(/^\.+/, '');
+      const count = mocks && typeof mocks === 'object' ? Object.keys(mocks).length : 0;
+      const name = await askName(`Import ${count} mock(s) as a flow named:`, base || 'imported');
+      if (name) importMocks(name, mocks);
+    });
+    input.click();
+  }
+
   function renderFlows() {
     if (flowDetail) return renderFlowDetail();
     const el = main();
+    const bar = `<div class="flows-bar"><button class="import-mocks">⬇ Import mocks</button></div>`;
     if (!flowList.length) {
-      el.innerHTML = mockBanner() + `<div class="empty">no saved flows yet — Clear, drive a flow, then “Save flow”</div>`;
+      el.innerHTML = bar + mockBanner() + `<div class="empty">no saved flows yet — Clear + drive a flow then “Save flow”, or Import mocks</div>`;
       return;
     }
-    el.innerHTML = mockBanner() + flowList.map((f) => `
+    el.innerHTML = bar + mockBanner() + flowList.map((f) => `
       <div class="row flow-row" data-id="${esc(f.id)}">
         <span class="ts">${time(f.createdAt)}</span>
         <span class="flow-name">${esc(f.name)}</span>
@@ -1019,6 +1060,7 @@ export function createApp(doc = globalThis.document) {
       if (mcall) { ev.stopPropagation(); toggleCallMock(mcall.dataset.flow, mcall.dataset.seq); return; }
       if (ev.target.closest('.mock-timing')) { ev.stopPropagation(); toggleTiming(); return; }
       if (ev.target.closest('.mock-stop')) { ev.stopPropagation(); stopMock(); return; }
+      if (ev.target.closest('.import-mocks')) { ev.stopPropagation(); openImportPicker(); return; }
       const editBtn = ev.target.closest('.edit-call');
       if (editBtn) { ev.stopPropagation(); editCall(editBtn.dataset.seq); return; }
       const editSave = ev.target.closest('.edit-save');
@@ -1089,6 +1131,7 @@ export function createApp(doc = globalThis.document) {
     openFlow,
     editCall,
     saveCallEdit,
+    importMocks,
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
     get statePaused() { return statePaused; },
