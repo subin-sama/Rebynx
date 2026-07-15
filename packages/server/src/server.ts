@@ -167,12 +167,13 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
   let mockServer: http.Server | null = null;
   let mockRoutes: RouteMap = {};
   let activePort = mockPort;
+  let mockTiming = false; // replay each call's captured latency
 
-  // Persist which flows/calls are mocked so reopening the app restores them.
+  // Persist which flows/calls are mocked (+ timing) so reopening restores them.
   const mockStateFile = path.join(flowsDir, '.mock-state.json');
   function saveMockState(): void {
     try {
-      fs.writeFileSync(mockStateFile, JSON.stringify({ flows: [...enabledFlows], calls: [...enabledCalls] }));
+      fs.writeFileSync(mockStateFile, JSON.stringify({ flows: [...enabledFlows], calls: [...enabledCalls], timing: mockTiming }));
     } catch { /* best effort */ }
   }
   // Restore synchronously so GET /mock reports the registry immediately on boot.
@@ -180,6 +181,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     const saved = JSON.parse(fs.readFileSync(mockStateFile, 'utf8'));
     if (Array.isArray(saved?.flows)) for (const f of saved.flows) enabledFlows.add(f);
     if (Array.isArray(saved?.calls)) for (const c of saved.calls) enabledCalls.add(c);
+    if (typeof saved?.timing === 'boolean') mockTiming = saved.timing;
   } catch { /* no saved state */ }
 
   // Resolve the enabled sources from disk into a grouped route map. Flow calls
@@ -211,7 +213,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     await rebuildRoutes();
     const shouldRun = enabledFlows.size + enabledCalls.size > 0;
     if (shouldRun && !mockServer) {
-      mockServer = createMockServer(() => mockRoutes);
+      mockServer = createMockServer(() => mockRoutes, () => mockTiming);
       await new Promise<void>((resolve) => mockServer!.listen(mockPort, '0.0.0.0', () => resolve()));
       activePort = (mockServer.address() as AddressInfo).port;
     } else if (!shouldRun && mockServer) {
@@ -234,6 +236,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
       active: !!mockServer,
       port,
       url: `http://${lanIp()}:${port}`,
+      timing: mockTiming,
       flows: [...enabledFlows],
       calls: [...enabledCalls],
       endpoints,
@@ -261,6 +264,14 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
         return true;
       }
       sendJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    if (url.pathname === '/mock/timing' && req.method === 'POST') {
+      let body: any;
+      try { body = await readJsonBody(req); } catch { body = {}; }
+      mockTiming = typeof body?.on === 'boolean' ? body.on : !mockTiming;
+      saveMockState();
+      sendJson(res, 200, mockStatus());
       return true;
     }
     const flow = url.pathname.match(/^\/mock\/flow\/([^/]+)$/);

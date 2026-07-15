@@ -454,6 +454,20 @@ describe('Flows — mock server', () => {
     expect(getEp.querySelector('a')?.getAttribute('href')).toBe('http://192.168.1.9:9091/mock/api/workingTime');
   });
 
+  test('the banner has a replay-timing toggle that posts to /mock/timing', async () => {
+    stubFetch({
+      '/flows': [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }],
+      '/mock': activeStatus({ flows: ['login'] }),
+      'POST /mock/timing': activeStatus({ flows: ['login'], timing: true }),
+    });
+    const app = createApp(document);
+    app.setActive('flows');
+    await flush();
+    expect(document.querySelector('#main .mock-timing')).toBeTruthy();
+    await app.toggleTiming();
+    expect(document.querySelector('#main .mock-timing.on')).toBeTruthy();
+  });
+
   test('stopMock clears the banner', async () => {
     stubFetch({ 'DELETE /mock': { active: false, flows: [], calls: [], endpoints: [] } });
     const app = createApp(document);

@@ -47,8 +47,8 @@ describe('buildRoutes + matchCall', () => {
   });
 });
 
-async function boot(getRoutes: () => import('./mock.js').RouteMap) {
-  const server = createMockServer(getRoutes);
+async function boot(getRoutes: () => import('./mock.js').RouteMap, getTiming?: () => boolean) {
+  const server = createMockServer(getRoutes, getTiming);
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address() as AddressInfo;
   return { server, base: `http://127.0.0.1:${port}` };
@@ -87,6 +87,30 @@ describe('createMockServer', () => {
       const res = await fetch(`${base}/x`, { method: 'OPTIONS' });
       expect(res.status).toBe(204);
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('delays by the saved duration when timing is enabled', async () => {
+    const routes = buildRoutes([{ ...call(1, 'GET', '/slow', { ok: 1 }), duration: 80 }]);
+    const { server, base } = await boot(() => routes, () => true);
+    try {
+      const t0 = Date.now();
+      await fetch(`${base}/slow`);
+      expect(Date.now() - t0).toBeGreaterThanOrEqual(60);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('does not delay when timing is disabled', async () => {
+    const routes = buildRoutes([{ ...call(1, 'GET', '/slow', { ok: 1 }), duration: 80 }]);
+    const { server, base } = await boot(() => routes); // timing off (default)
+    try {
+      const t0 = Date.now();
+      await fetch(`${base}/slow`);
+      expect(Date.now() - t0).toBeLessThan(60);
     } finally {
       await new Promise((r) => server.close(r));
     }

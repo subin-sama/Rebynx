@@ -60,7 +60,7 @@ const STRIP = new Set(['content-length', 'content-encoding', 'transfer-encoding'
  * registry can change without a restart). One cursor per server instance drives
  * the replay sequence.
  */
-export function createMockServer(getRoutes: () => RouteMap): http.Server {
+export function createMockServer(getRoutes: () => RouteMap, getTiming: () => boolean = () => false): http.Server {
   const cursor = new Map<string, number>();
   return http.createServer((req, res) => {
     if (req.method === 'OPTIONS') {
@@ -88,7 +88,13 @@ export function createMockServer(getRoutes: () => RouteMap): http.Server {
       headers['content-type'] = 'application/json; charset=utf-8';
     }
     const body = call.response.body;
-    res.writeHead(call.status ?? 200, headers);
-    res.end(typeof body === 'string' ? body : JSON.stringify(body ?? null));
+    const send = () => {
+      res.writeHead(call.status ?? 200, headers);
+      res.end(typeof body === 'string' ? body : JSON.stringify(body ?? null));
+    };
+    // Optionally reproduce the captured latency (clamped) to simulate the real API.
+    const delay = getTiming() && typeof call.duration === 'number' ? Math.min(Math.max(call.duration, 0), 10000) : 0;
+    if (delay > 0) setTimeout(send, delay);
+    else send();
   });
 }

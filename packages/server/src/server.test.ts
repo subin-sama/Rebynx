@@ -315,3 +315,17 @@ describe('mock registry persistence', () => {
     await new Promise((r) => server2.close(r));
   });
 });
+
+describe('POST /mock/timing (replay latency)', () => {
+  test('toggles + persists the timing flag', async () => {
+    const on: any = await (await fetch(`${base}/mock/timing`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: true }),
+    })).json();
+    expect(on.timing).toBe(true);
+    expect((await (await fetch(`${base}/mock`)).json() as any).timing).toBe(true);
+    const off: any = await (await fetch(`${base}/mock/timing`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }),
+    })).json();
+    expect(off.timing).toBe(false);
+  });
+});

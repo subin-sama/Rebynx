@@ -709,6 +709,12 @@ export function createApp(doc = globalThis.document) {
     await applyMock(await fetch('/mock', { method: 'DELETE' }));
   }
 
+  async function toggleTiming() {
+    await applyMock(await fetch('/mock/timing', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: !mockState.timing }),
+    }));
+  }
+
   function mockBanner() {
     if (!mockState.active) return '';
     const n = mockState.endpoints.length;
@@ -726,6 +732,7 @@ export function createApp(doc = globalThis.document) {
       <div class="mock-banner-row">
         <span class="mock-dot"></span>
         <span>Mock API live · ${n} endpoint${n === 1 ? '' : 's'}</span>
+        <button class="mock-timing ${mockState.timing ? 'on' : ''}" title="Replay each call's captured latency">⏱ timing ${mockState.timing ? 'on' : 'off'}</button>
         <button class="mock-stop">Stop</button>
       </div>
       ${codeBlock('point your app’s baseURL here', mockState.url)}
@@ -994,6 +1001,7 @@ export function createApp(doc = globalThis.document) {
       if (mflow) { ev.stopPropagation(); toggleFlowMock(mflow.dataset.id); return; }
       const mcall = ev.target.closest('.mock-call');
       if (mcall) { ev.stopPropagation(); toggleCallMock(mcall.dataset.flow, mcall.dataset.seq); return; }
+      if (ev.target.closest('.mock-timing')) { ev.stopPropagation(); toggleTiming(); return; }
       if (ev.target.closest('.mock-stop')) { ev.stopPropagation(); stopMock(); return; }
       const editBtn = ev.target.closest('.edit-call');
       if (editBtn) { ev.stopPropagation(); editCall(editBtn.dataset.seq); return; }
@@ -1059,6 +1067,7 @@ export function createApp(doc = globalThis.document) {
     toggleFlowMock,
     toggleCallMock,
     stopMock,
+    toggleTiming,
     saveFlow,
     removeFlow,
     openFlow,
