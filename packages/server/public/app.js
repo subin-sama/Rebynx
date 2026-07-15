@@ -128,6 +128,24 @@ export function jsonBlock(label, value) {
 
 const isPlainObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 
+/** True if `s` is a string whose contents parse to a JSON object/array. */
+export function isJsonObjectString(s) {
+  if (typeof s !== 'string') return false;
+  try {
+    const v = JSON.parse(s);
+    return v !== null && typeof v === 'object';
+  } catch {
+    return false;
+  }
+}
+
+/** Pretty-print a captured body for editing — a JSON-in-a-string is unwrapped so
+ * it reads as JSON instead of an escaped one-liner. */
+export function prettyBody(v) {
+  if (isJsonObjectString(v)) return JSON.stringify(JSON.parse(v), null, 2);
+  return JSON.stringify(v === undefined ? null : v, null, 2);
+}
+
 /**
  * Deep-diff two state snapshots into a flat, path-keyed change list:
  * `[{ path, kind: 'added'|'removed'|'changed', from?, to? }]`. Arrays and
@@ -732,10 +750,17 @@ export function createApp(doc = globalThis.document) {
     const reqEl = root.querySelector('.edit-req');
     const resEl = root.querySelector('.edit-res');
     const statusEl = root.querySelector('.edit-status');
+    // Re-encode in the body's original wire shape: a body captured as a
+    // JSON-string is edited as readable JSON but saved back as a string.
+    const orig = (flowDetail.calls || []).find((c) => String(c.seq) === String(seq)) || { request: {}, response: {} };
+    const reencode = (text, origBody) => {
+      const parsed = JSON.parse(text);
+      return isJsonObjectString(origBody) ? JSON.stringify(parsed) : parsed;
+    };
     let requestBody, responseBody;
     try {
-      requestBody = JSON.parse(reqEl.value);
-      responseBody = JSON.parse(resEl.value);
+      requestBody = reencode(reqEl.value, orig.request && orig.request.body);
+      responseBody = reencode(resEl.value, orig.response && orig.response.body);
     } catch (e) {
       if (errEl) errEl.textContent = 'Invalid JSON: ' + e.message;
       return;
@@ -760,13 +785,12 @@ export function createApp(doc = globalThis.document) {
 
   // The editor that replaces a call's read-only panels while editing.
   function callEditor(f, c) {
-    const pretty = (v) => JSON.stringify(v === undefined ? null : v, null, 2);
     return `<div class="call-editor">
       <div class="edit-field"><span class="json-label">status</span><input class="edit-status" value="${esc(c.status != null ? c.status : 200)}" /></div>
       <div class="json-label">request body (payload)</div>
-      <textarea class="edit-req" spellcheck="false">${esc(pretty(c.request && c.request.body))}</textarea>
+      <textarea class="edit-req" spellcheck="false">${esc(prettyBody(c.request && c.request.body))}</textarea>
       <div class="json-label">response body</div>
-      <textarea class="edit-res" spellcheck="false">${esc(pretty(c.response && c.response.body))}</textarea>
+      <textarea class="edit-res" spellcheck="false">${esc(prettyBody(c.response && c.response.body))}</textarea>
       <div class="edit-error"></div>
       <div class="edit-btns">
         <button class="edit-cancel">Cancel</button>

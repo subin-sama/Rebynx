@@ -558,6 +558,39 @@ describe('Flows — edit a call (payload/response/status)', () => {
     expect(patches[0].body.status).toBe(500);
   });
 
+  test('a JSON-string body is shown as readable JSON and saved back as a string', async () => {
+    const jsFlow = {
+      id: 'js', name: 'JS', createdAt: 1, calls: [
+        { seq: 1, method: 'POST', url: 'https://api/x', status: 200, request: { headers: {}, body: '{"lang":"EN","n":37}' }, response: { headers: {}, body: { ok: true } } },
+      ],
+    };
+    globalThis.fetch = (url) => url === '/flows/js'
+      ? Promise.resolve({ ok: true, status: 200, json: async () => jsFlow })
+      : Promise.resolve({ ok: true, status: 200, json: async () => ({ active: false, flows: [], calls: [], endpoints: [] }) });
+    const app = createApp(document);
+    app.setActive('flows');
+    await app.openFlow('js');
+    await flush();
+    app.editCall(1);
+    // shown as readable JSON, not an escaped one-liner string
+    const reqText = document.querySelector('#main .edit-req').value;
+    expect(reqText).toContain('"lang": "EN"');
+    expect(reqText).not.toContain('\\"');
+
+    const patches = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'PATCH') { patches.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => jsFlow }); }
+      if (url === '/flows/js') return Promise.resolve({ ok: true, status: 200, json: async () => jsFlow });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ active: false, flows: [], calls: [], endpoints: [] }) });
+    };
+    await app.saveCallEdit('js', 1);
+    // saved back in the same wire shape: a JSON string
+    expect(typeof patches[0].requestBody).toBe('string');
+    expect(JSON.parse(patches[0].requestBody)).toEqual({ lang: 'EN', n: 37 });
+    // the response (an object) stays an object
+    expect(patches[0].responseBody).toEqual({ ok: true });
+  });
+
   test('invalid JSON shows an error and sends no PATCH', async () => {
     const app = createApp(document);
     await openDetail(app);
