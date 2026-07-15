@@ -250,6 +250,15 @@ describe('/mock (serve saved flows as an API)', () => {
   test('enabling a missing flow is 404', async () => {
     expect((await fetch(`${base}/mock/flow/nope`, { method: 'POST' })).status).toBe(404);
   });
+
+  test('deleting a mocked flow drops it from the registry and stops serving it', async () => {
+    await saveSample();
+    await fetch(`${base}/mock/flow/login`, { method: 'POST' });
+    await fetch(`${base}/flows/login`, { method: 'DELETE' });
+    const after: any = await (await fetch(`${base}/mock`)).json();
+    expect(after.flows).not.toContain('login');
+    expect(after.endpoints).toEqual([]);
+  });
 });
 
 describe('PATCH /flows/:id/calls/:seq (edit a saved call)', () => {

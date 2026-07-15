@@ -314,6 +314,22 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     return false;
   }
 
+  // DELETE /flows/:id — delete the flow AND drop it from the mock registry, so a
+  // running mock stops serving it (handleFlows can't reach the registry).
+  async function handleFlowDelete(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
+    const m = url.pathname.match(/^\/flows\/([^/]+)$/);
+    if (!m || req.method !== 'DELETE') return false;
+    const id = decodeURIComponent(m[1]);
+    const ok = await deleteFlow(flowsDir, id);
+    let changed = enabledFlows.delete(id);
+    for (const ck of [...enabledCalls]) {
+      if (ck.startsWith(id + '#')) { enabledCalls.delete(ck); changed = true; }
+    }
+    if (changed) await syncMock();
+    sendJson(res, ok ? 200 : 404, ok ? { ok: true } : { error: 'not found' });
+    return true;
+  }
+
   // PATCH /flows/:id/calls/:seq — edit a saved call's body/status in place. Lives
   // here (not handleFlows) because it must rebuild a running mock's routes so the
   // edit is served immediately.
@@ -357,6 +373,7 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     try {
       if (await handleMock(req, res, url)) return;
       if (await handleFlowPatch(req, res, url)) return;
+      if (await handleFlowDelete(req, res, url)) return;
       if (await handleFlows(req, res, url, flowsDir)) return;
     } catch {
       sendJson(res, 500, { error: 'internal error' });
