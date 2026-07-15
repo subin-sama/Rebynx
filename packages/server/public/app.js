@@ -721,6 +721,7 @@ export function createApp(doc = globalThis.document) {
         : `<span class="mock-ep-url">${esc(full)}</span>`;
       return `<div class="mock-ep"><span class="method">${esc(e.method)}</span>${link}</div>`;
     }).join('');
+    const emuUrl = `http://10.0.2.2:${mockState.port}`;
     return `<div class="mock-banner">
       <div class="mock-banner-row">
         <span class="mock-dot"></span>
@@ -728,6 +729,7 @@ export function createApp(doc = globalThis.document) {
         <button class="mock-stop">Stop</button>
       </div>
       ${codeBlock('point your app’s baseURL here', mockState.url)}
+      <div class="mock-emu">Android emulator can’t reach the LAN IP — use <code>${esc(emuUrl)}</code></div>
       ${eps ? `<div class="mock-eps">${eps}</div>` : ''}
     </div>`;
   }
