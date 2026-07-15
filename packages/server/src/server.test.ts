@@ -338,3 +338,26 @@ describe('POST /mock/timing (replay latency)', () => {
     expect(off.timing).toBe(false);
   });
 });
+
+describe('POST /flows/import (api-mapper mocks → flow)', () => {
+  test('creates and persists a flow from a mock map', async () => {
+    const res = await fetch(`${base}/flows/import`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'aeoon', mocks: { '/api/x': { endpoint: '/api/x', statusCode: '200', resBody: '{"ok":1}' } } }),
+    });
+    expect(res.status).toBe(201);
+    const flow: any = await res.json();
+    expect(flow.id).toBe('aeoon');
+    expect(flow.calls[0].url).toBe('/api/x');
+    expect(flow.calls[0].response.body).toEqual({ ok: 1 });
+    expect(fs.existsSync(path.join(flowsDir, 'aeoon.json'))).toBe(true);
+  });
+
+  test('rejects a non-object mocks with 400', async () => {
+    const res = await fetch(`${base}/flows/import`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'x', mocks: 'nope' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

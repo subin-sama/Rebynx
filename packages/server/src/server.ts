@@ -26,7 +26,7 @@ import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, WebSocket } from 'ws';
-import { deleteFlow, getFlow, listFlows, saveFlow, updateCall } from './flows.js';
+import { deleteFlow, getFlow, listFlows, saveFlow, updateCall, mocksToFlow } from './flows.js';
 import type { FlowCall } from './flows.js';
 import { buildRoutes, createMockServer, type RouteMap } from './mock.js';
 
@@ -93,6 +93,34 @@ async function handleFlows(
   url: URL,
   flowsDir: string,
 ): Promise<boolean> {
+  // Import an api-ui-mapper mock map as a new flow (checked before /flows/:id).
+  if (url.pathname === '/flows/import') {
+    if (req.method !== 'POST') {
+      sendJson(res, 405, { error: 'method not allowed' });
+      return true;
+    }
+    let body: any;
+    try {
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { error: 'invalid json' });
+      return true;
+    }
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    const mocks = body?.mocks;
+    if (!name) {
+      sendJson(res, 400, { error: 'name required' });
+      return true;
+    }
+    if (!mocks || typeof mocks !== 'object' || Array.isArray(mocks)) {
+      sendJson(res, 400, { error: 'mocks must be an object' });
+      return true;
+    }
+    const flow = await saveFlow(flowsDir, mocksToFlow(mocks, name));
+    sendJson(res, 201, flow);
+    return true;
+  }
+
   if (url.pathname === '/flows') {
     if (req.method === 'GET') {
       sendJson(res, 200, await listFlows(flowsDir));
