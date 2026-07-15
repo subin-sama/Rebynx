@@ -101,7 +101,7 @@ export async function listFlows(dir: string): Promise<FlowSummary[]> {
 
   const summaries: FlowSummary[] = [];
   for (const name of names) {
-    if (!name.endsWith('.json')) continue;
+    if (name.startsWith('.') || !name.endsWith('.json')) continue; // skip dotfiles (e.g. .mock-state.json)
     try {
       const raw = await fs.readFile(path.join(dir, name), 'utf8');
       const flow = JSON.parse(raw) as Flow;

@@ -296,3 +296,22 @@ describe('PATCH /flows/:id/calls/:seq (edit a saved call)', () => {
     expect((await fetch(`${base}/flows/edit/calls/1`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{ bad' })).status).toBe(400);
   });
 });
+
+describe('mock registry persistence', () => {
+  test('restores enabled flows from disk on a fresh server (restart)', async () => {
+    await fetch(`${base}/flows`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'login', calls: [{ seq: 1, method: 'GET', url: 'https://api/x/profile', status: 200, request: {}, response: { headers: {}, body: { name: 'Jane' } } }] }),
+    });
+    await fetch(`${base}/mock/flow/login`, { method: 'POST' });
+    await new Promise((r) => server.close(r));
+
+    // a fresh relay on the SAME flowsDir — simulates reopening the app
+    const server2 = createRelayServer({ flowsDir, mockPort: 0 });
+    await new Promise<void>((res) => server2.listen(0, '127.0.0.1', res));
+    const p2 = (server2.address() as AddressInfo).port;
+    const st: any = await (await fetch(`http://127.0.0.1:${p2}/mock`)).json();
+    expect(st.flows).toContain('login');
+    await new Promise((r) => server2.close(r));
+  });
+});

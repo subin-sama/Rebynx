@@ -146,6 +146,15 @@ describe('deleteFlow', () => {
   });
 });
 
+describe('listFlows', () => {
+  test('ignores dotfiles (e.g. the .mock-state.json registry)', async () => {
+    await saveFlow(dir, { name: 'Flow', calls: [call(1)] });
+    fs.writeFileSync(path.join(dir, '.mock-state.json'), '{"flows":["flow"],"calls":[]}');
+    const list = await listFlows(dir);
+    expect(list.map((f) => f.id)).toEqual(['flow']);
+  });
+});
+
 describe('updateCall', () => {
   test('edits response body, request body and status, recomputing ok + persisting', async () => {
     await saveFlow(dir, { name: 'Flow', calls: [call(1), call(2)] });

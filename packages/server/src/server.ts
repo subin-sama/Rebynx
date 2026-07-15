@@ -168,6 +168,20 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
   let mockRoutes: RouteMap = {};
   let activePort = mockPort;
 
+  // Persist which flows/calls are mocked so reopening the app restores them.
+  const mockStateFile = path.join(flowsDir, '.mock-state.json');
+  function saveMockState(): void {
+    try {
+      fs.writeFileSync(mockStateFile, JSON.stringify({ flows: [...enabledFlows], calls: [...enabledCalls] }));
+    } catch { /* best effort */ }
+  }
+  // Restore synchronously so GET /mock reports the registry immediately on boot.
+  try {
+    const saved = JSON.parse(fs.readFileSync(mockStateFile, 'utf8'));
+    if (Array.isArray(saved?.flows)) for (const f of saved.flows) enabledFlows.add(f);
+    if (Array.isArray(saved?.calls)) for (const c of saved.calls) enabledCalls.add(c);
+  } catch { /* no saved state */ }
+
   // Resolve the enabled sources from disk into a grouped route map. Flow calls
   // then individually-enabled calls, deduped by flowId#seq (sequence merge).
   async function rebuildRoutes(): Promise<void> {
@@ -204,7 +218,11 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
       await new Promise<void>((resolve) => mockServer!.close(() => resolve()));
       mockServer = null;
     }
+    saveMockState();
   }
+
+  // Bring a restored registry live (async — GET /mock already reports the sets).
+  if (enabledFlows.size + enabledCalls.size > 0) void syncMock();
 
   function mockStatus() {
     const endpoints = Object.entries(mockRoutes).map(([k, list]) => {
