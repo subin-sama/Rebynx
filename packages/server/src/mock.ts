@@ -60,8 +60,16 @@ export function matchCall(
   cursor: Map<string, number>,
   reqBody?: unknown,
 ): FlowCall | null {
-  const key = routeKey(method, pathname);
-  const list = routes[key];
+  let key = routeKey(method, pathname);
+  let list = routes[key];
+  // Path-only fallback: imported mocks (and api-mapper) key by path, not method,
+  // so when there's no exact method+path route, match any route with this path.
+  if (!list || !list.length) {
+    const suffix = ` ${pathname}`;
+    for (const k of Object.keys(routes)) {
+      if (k.endsWith(suffix) && routes[k].length) { key = k; list = routes[k]; break; }
+    }
+  }
   if (!list || !list.length) return null;
   if (reqBody !== undefined && reqBody !== null && reqBody !== '') {
     const want = bodyKey(reqBody);

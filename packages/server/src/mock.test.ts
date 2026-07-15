@@ -54,10 +54,25 @@ describe('buildRoutes + matchCall', () => {
     expect(matchCall(routes, 'POST', '/pay', cursor, { type: 'Z' })?.response.body).toEqual({ result: 'A' });
   });
 
-  test('returns null when nothing matches', () => {
+  test('returns null only when the path is unknown', () => {
     const routes = buildRoutes([call(1, 'GET', '/a', {})]);
-    expect(matchCall(routes, 'POST', '/a', new Map())).toBeNull();
-    expect(matchCall(routes, 'GET', '/b', new Map())).toBeNull();
+    expect(matchCall(routes, 'GET', '/b', new Map())).toBeNull(); // no such path
+  });
+
+  test('falls back to path-only when there is no exact method+path route', () => {
+    // imported mocks are stored as GET; a POST to the same path still matches
+    const routes = buildRoutes([call(1, 'GET', '/oauth/token', { tok: 1 })]);
+    expect(matchCall(routes, 'POST', '/oauth/token', new Map())?.response.body).toEqual({ tok: 1 });
+  });
+
+  test('an exact method+path route wins over a same-path different-method one', () => {
+    const routes = buildRoutes([
+      call(1, 'GET', '/x', { m: 'get' }),
+      call(2, 'POST', '/x', { m: 'post' }),
+    ]);
+    const cursor = new Map<string, number>();
+    expect(matchCall(routes, 'POST', '/x', cursor)?.response.body).toEqual({ m: 'post' });
+    expect(matchCall(routes, 'GET', '/x', cursor)?.response.body).toEqual({ m: 'get' });
   });
 
   test('routeKey uppercases method and defaults to GET', () => {
