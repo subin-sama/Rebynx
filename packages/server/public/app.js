@@ -770,6 +770,10 @@ export function createApp(doc = globalThis.document) {
     const reqEl = root.querySelector('.edit-req');
     const resEl = root.querySelector('.edit-res');
     const statusEl = root.querySelector('.edit-status');
+    const methodEl = root.querySelector('.edit-method');
+    const urlEl = root.querySelector('.edit-url');
+    const reqhEl = root.querySelector('.edit-reqh');
+    const reshEl = root.querySelector('.edit-resh');
     // Re-encode in the body's original wire shape: a body captured as a
     // JSON-string is edited as readable JSON but saved back as a string.
     const orig = (flowDetail.calls || []).find((c) => String(c.seq) === String(seq)) || { request: {}, response: {} };
@@ -777,15 +781,18 @@ export function createApp(doc = globalThis.document) {
       const parsed = JSON.parse(text);
       return isJsonObjectString(origBody) ? JSON.stringify(parsed) : parsed;
     };
-    let requestBody, responseBody;
+    const patch = {};
     try {
-      requestBody = reencode(reqEl.value, orig.request && orig.request.body);
-      responseBody = reencode(resEl.value, orig.response && orig.response.body);
+      patch.requestBody = reencode(reqEl.value, orig.request && orig.request.body);
+      patch.responseBody = reencode(resEl.value, orig.response && orig.response.body);
+      if (reqhEl) patch.requestHeaders = JSON.parse(reqhEl.value);
+      if (reshEl) patch.responseHeaders = JSON.parse(reshEl.value);
     } catch (e) {
       if (errEl) errEl.textContent = 'Invalid JSON: ' + e.message;
       return;
     }
-    const patch = { requestBody, responseBody };
+    if (methodEl && methodEl.value.trim()) patch.method = methodEl.value.trim();
+    if (urlEl) patch.url = urlEl.value.trim();
     const status = parseInt(statusEl.value, 10);
     if (!Number.isNaN(status)) patch.status = status;
     try {
@@ -816,11 +823,19 @@ export function createApp(doc = globalThis.document) {
 
   function callEditor(f, c) {
     return `<div class="call-editor">
-      <div class="edit-field"><span class="json-label">status</span><input class="edit-status" value="${esc(c.status != null ? c.status : 200)}" /></div>
+      <div class="edit-field">
+        <input class="edit-method" value="${esc(c.method || 'GET')}" placeholder="method" />
+        <input class="edit-url" value="${esc(c.url || '')}" placeholder="url" />
+        <input class="edit-status" value="${esc(c.status != null ? c.status : 200)}" placeholder="status" />
+      </div>
       <div class="json-label">request body (payload)</div>
       ${hlField('edit-req', prettyBody(c.request && c.request.body))}
+      <div class="json-label">request headers</div>
+      <textarea class="edit-reqh hdr-edit" spellcheck="false">${esc(prettyBody((c.request && c.request.headers) || {}))}</textarea>
       <div class="json-label">response body</div>
       ${hlField('edit-res', prettyBody(c.response && c.response.body))}
+      <div class="json-label">response headers</div>
+      <textarea class="edit-resh hdr-edit" spellcheck="false">${esc(prettyBody((c.response && c.response.headers) || {}))}</textarea>
       <div class="edit-error"></div>
       <div class="edit-btns">
         <button class="edit-cancel">Cancel</button>

@@ -185,6 +185,19 @@ describe('updateCall', () => {
     expect(updated!.calls[0].response.body).toBeNull();
   });
 
+  test('edits method, url, and request/response headers', async () => {
+    await saveFlow(dir, { name: 'Flow', calls: [call(1)] });
+    const u = await updateCall(dir, 'flow', 1, {
+      method: 'POST', url: 'https://new/x',
+      requestHeaders: { 'x-new': '1' }, responseHeaders: { 'content-type': 'text/plain' },
+    });
+    const c = u!.calls[0];
+    expect(c.method).toBe('POST');
+    expect(c.url).toBe('https://new/x');
+    expect(c.request.headers).toEqual({ 'x-new': '1' });
+    expect(c.response.headers).toEqual({ 'content-type': 'text/plain' });
+  });
+
   test('returns null for an unknown id or seq', async () => {
     await saveFlow(dir, { name: 'Flow', calls: [call(1)] });
     expect(await updateCall(dir, 'nope', 1, { status: 200 })).toBeNull();

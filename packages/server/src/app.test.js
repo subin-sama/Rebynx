@@ -631,6 +631,28 @@ describe('Flows — edit a call (payload/response/status)', () => {
     expect(patches[0].responseBody).toEqual({ ok: true });
   });
 
+  test('the editor edits method, url and headers too', async () => {
+    const app = createApp(document);
+    await openDetail(app);
+    app.editCall(1);
+    expect(document.querySelector('#main .edit-method')).toBeTruthy();
+    expect(document.querySelector('#main .edit-url')).toBeTruthy();
+    expect(document.querySelector('#main .edit-reqh')).toBeTruthy();
+    const patches = [];
+    globalThis.fetch = (url, opts) => {
+      if (opts && opts.method === 'PATCH') { patches.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, status: 200, json: async () => flow }); }
+      if (url === '/flows/edit') return Promise.resolve({ ok: true, status: 200, json: async () => flow });
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ active: false, flows: [], calls: [], endpoints: [] }) });
+    };
+    document.querySelector('#main .edit-method').value = 'DELETE';
+    document.querySelector('#main .edit-url').value = 'https://api/y';
+    document.querySelector('#main .edit-resh').value = '{"content-type":"text/plain"}';
+    await app.saveCallEdit('edit', 1);
+    expect(patches[0].method).toBe('DELETE');
+    expect(patches[0].url).toBe('https://api/y');
+    expect(patches[0].responseHeaders).toEqual({ 'content-type': 'text/plain' });
+  });
+
   test('invalid JSON shows an error and sends no PATCH', async () => {
     const app = createApp(document);
     await openDetail(app);

@@ -164,6 +164,13 @@
       .edit-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
       .edit-status { width: 90px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; font-family: var(--mono); outline: none; }
       .edit-status:focus { border-color: var(--accent); }
+      .edit-field { flex-wrap: wrap; }
+      .edit-method { width: 80px; }
+      .edit-url { flex: 1; min-width: 180px; }
+      .edit-method, .edit-url { background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; font-family: var(--mono); font-size: 12px; outline: none; }
+      .edit-method:focus, .edit-url:focus { border-color: var(--accent); }
+      .hdr-edit { width: 100%; min-height: 52px; margin: 4px 0 8px; background: var(--panel); border: 1px solid var(--border); color: #c8cdd6; border-radius: 6px; padding: 6px 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; outline: none; white-space: pre; box-sizing: border-box; }
+      .hdr-edit:focus { border-color: var(--accent); }
       /* Highlighted editor: transparent textarea layered over a coloured <pre>.
          Both share identical geometry so the caret lines up with the colours. */
       .hl-editor { position: relative; height: 160px; margin: 4px 0 8px; }

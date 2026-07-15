@@ -132,8 +132,12 @@ export async function getFlow(dir: string, id: string): Promise<Flow | null> {
 
 /** Fields of a single call that can be edited in place. */
 export interface CallPatch {
+  method?: string;
+  url?: string;
   requestBody?: unknown;
   responseBody?: unknown;
+  requestHeaders?: Record<string, string>;
+  responseHeaders?: Record<string, string>;
   status?: number;
 }
 
@@ -151,8 +155,12 @@ export async function updateCall(dir: string, id: string, seq: number, patch: Ca
   const call = flow.calls.find((c) => c.seq === seq);
   if (!call) return null;
 
+  if (typeof patch.method === 'string') call.method = patch.method;
+  if (typeof patch.url === 'string') call.url = patch.url;
   if ('requestBody' in patch) call.request = { ...call.request, body: patch.requestBody };
+  if (patch.requestHeaders !== undefined) call.request = { ...call.request, headers: patch.requestHeaders };
   if ('responseBody' in patch) call.response = { ...call.response, body: patch.responseBody };
+  if (patch.responseHeaders !== undefined) call.response = { ...call.response, headers: patch.responseHeaders };
   if (typeof patch.status === 'number') {
     call.status = patch.status;
     call.ok = patch.status < 400;
