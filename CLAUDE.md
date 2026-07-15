@@ -109,6 +109,8 @@ import { createReduxMiddleware } from '@rebynx/core';
 initDevTools({
   url: 'ws://YOUR_MACHINE_LAN_IP:9090', // omit for overlay-only
   zustand: { cart: useCartStore },       // optional
+  // optional redaction (extends the built-in secret list; allowKeys are exempt):
+  redact: { redactKeys: ['deviceId'], allowKeys: ['passwordPolicy'] },
 });
 // Redux is wired at store creation:
 //   middleware: (getDefault) => getDefault().concat(createReduxMiddleware(devtoolsHub))
@@ -134,8 +136,9 @@ Use the LAN IP (not `localhost`) so a physical device can reach the relay.
    devtools) can register a renderer for both UIs, not just a filter.
 5. **Command round-trip** — wire `onCommand` in `initDevTools` so the browser's
    Clear and a future "trigger inspect" actually drive the app.
-6. **Redaction** — add an allow/deny list in `sanitize()` for auth headers/tokens
-   before anything leaves the device.
+6. **Redaction** — DONE: `sanitize()` has a built-in secret deny list plus
+   `allowKeys` exceptions, configurable process-wide via `configureRedaction()`
+   / `initDevTools({ redact })`.
 
 ## Conventions
 

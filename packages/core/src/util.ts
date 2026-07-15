@@ -27,6 +27,17 @@ export interface SanitizeOpts {
   allowKeys?: string[];
 }
 
+// Process-wide redaction config, set once via configureRedaction() (e.g. from
+// initDevTools). `redactKeys` here EXTEND the built-in defaults (so you never
+// accidentally un-hide the built-ins); `allowKeys` exempt keys from redaction.
+const runtimeRedact: { redactKeys?: string[]; allowKeys?: string[] } = {};
+
+/** Configure redaction globally: extra keys to redact + keys to never redact. */
+export function configureRedaction(opts: { redactKeys?: string[]; allowKeys?: string[] }): void {
+  if (opts.redactKeys !== undefined) runtimeRedact.redactKeys = opts.redactKeys;
+  if (opts.allowKeys !== undefined) runtimeRedact.allowKeys = opts.allowKeys;
+}
+
 const DEFAULT_REDACT_KEYS = [
   'authorization',
   'cookie',
@@ -52,8 +63,9 @@ const DEFAULT_REDACT_KEYS = [
  */
 export function sanitize(value: unknown, opts: SanitizeOpts = {}): unknown {
   const { maxDepth = 6, maxString = 10_000, maxArray = 200 } = opts;
-  const redactList = opts.redactKeys || DEFAULT_REDACT_KEYS;
-  const allowList = opts.allowKeys || [];
+  // Call-level opts fully override; otherwise defaults + any configured extras.
+  const redactList = opts.redactKeys ?? [...DEFAULT_REDACT_KEYS, ...(runtimeRedact.redactKeys ?? [])];
+  const allowList = opts.allowKeys ?? runtimeRedact.allowKeys ?? [];
   const seen = new WeakSet<object>();
 
   function walk(v: unknown, depth: number): unknown {

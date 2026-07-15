@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { RingBuffer, sanitize, formatArg, uid } from './util.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { RingBuffer, sanitize, formatArg, uid, configureRedaction } from './util.js';
 
 describe('RingBuffer', () => {
   it('should keep size bounded', () => {
@@ -43,6 +43,19 @@ describe('sanitize redaction', () => {
   it('redacts common auth patterns by default', () => {
     const out = sanitize({ bearer: 'x', credential: 'y', api_key: 'z', jwt: 'w' }) as Record<string, unknown>;
     expect(out).toEqual({ bearer: '[REDACTED]', credential: '[REDACTED]', api_key: '[REDACTED]', jwt: '[REDACTED]' });
+  });
+});
+
+describe('configureRedaction', () => {
+  afterEach(() => configureRedaction({ redactKeys: [], allowKeys: [] })); // reset global state
+
+  it('extends the deny list and applies the allow list to every sanitize() call', () => {
+    configureRedaction({ redactKeys: ['deviceId'], allowKeys: ['passwordPolicy'] });
+    const out = sanitize({ deviceId: 'x', authorization: 'y', passwordPolicy: 'z', name: 'n' }) as Record<string, unknown>;
+    expect(out.deviceId).toBe('[REDACTED]');       // custom deny key
+    expect(out.authorization).toBe('[REDACTED]');  // built-in defaults still apply
+    expect(out.passwordPolicy).toBe('z');           // allow-list exception
+    expect(out.name).toBe('n');
   });
 });
 

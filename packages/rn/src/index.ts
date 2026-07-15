@@ -5,6 +5,7 @@ import {
   installConsole,
   installNetwork,
   trackZustand,
+  configureRedaction,
   type DevCommand,
 } from '@rebynx/core';
 
@@ -22,6 +23,9 @@ export interface InitOptions {
   bufferSize?: number;
   /** Handle commands sent from the browser (e.g. trigger native inspect). */
   onCommand?: (cmd: DevCommand) => void;
+  /** Redaction: extra key substrings to hide + keys to never hide. Applied to
+   *  every event before it leaves the device (extends the built-in secret list). */
+  redact?: { redactKeys?: string[]; allowKeys?: string[] };
 }
 
 /** Shared singletons so the Overlay component and your app see the same hub. */
@@ -42,7 +46,10 @@ export function initDevTools(options: InitOptions = {}): void {
   if (!__DEV__ || started) return;
   started = true;
 
-  const { url, inApp = true, zustand, bufferSize, onCommand } = options;
+  const { url, inApp = true, zustand, bufferSize, onCommand, redact } = options;
+
+  // Configure redaction first so every collector's sanitize() picks it up.
+  if (redact) configureRedaction(redact);
 
   // re-create hub with custom buffer size if requested
   if (bufferSize) (hub as any).buffer?.clear?.();
