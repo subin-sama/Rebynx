@@ -35,6 +35,25 @@ describe('buildRoutes + matchCall', () => {
     expect(matchCall(routes, 'GET', '/poll', cursor)?.response.body).toEqual({ step: 2 }); // clamp
   });
 
+  test('prefers the call whose saved request body matches the incoming body', () => {
+    const routes = buildRoutes([
+      { ...call(1, 'POST', '/pay', { result: 'A' }), request: { headers: {}, body: { type: 'A' } } },
+      { ...call(2, 'POST', '/pay', { result: 'B' }), request: { headers: {}, body: { type: 'B' } } },
+    ]);
+    const cursor = new Map<string, number>();
+    expect(matchCall(routes, 'POST', '/pay', cursor, { type: 'B' })?.response.body).toEqual({ result: 'B' });
+    expect(matchCall(routes, 'POST', '/pay', cursor, { type: 'A' })?.response.body).toEqual({ result: 'A' });
+  });
+
+  test('falls back to sequence when the body matches nothing', () => {
+    const routes = buildRoutes([
+      { ...call(1, 'POST', '/pay', { result: 'A' }), request: { headers: {}, body: { type: 'A' } } },
+      { ...call(2, 'POST', '/pay', { result: 'B' }), request: { headers: {}, body: { type: 'B' } } },
+    ]);
+    const cursor = new Map<string, number>();
+    expect(matchCall(routes, 'POST', '/pay', cursor, { type: 'Z' })?.response.body).toEqual({ result: 'A' });
+  });
+
   test('returns null when nothing matches', () => {
     const routes = buildRoutes([call(1, 'GET', '/a', {})]);
     expect(matchCall(routes, 'POST', '/a', new Map())).toBeNull();
@@ -111,6 +130,20 @@ describe('createMockServer', () => {
       const t0 = Date.now();
       await fetch(`${base}/slow`);
       expect(Date.now() - t0).toBeLessThan(60);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
+  test('matches by request body when one path has different payloads', async () => {
+    const routes = buildRoutes([
+      { ...call(1, 'POST', '/pay', { result: 'A' }), request: { headers: {}, body: { type: 'A' } } },
+      { ...call(2, 'POST', '/pay', { result: 'B' }), request: { headers: {}, body: { type: 'B' } } },
+    ]);
+    const { server, base } = await boot(() => routes);
+    try {
+      const rb = await (await fetch(`${base}/pay`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'B' }) })).json();
+      expect(rb).toEqual({ result: 'B' });
     } finally {
       await new Promise((r) => server.close(r));
     }

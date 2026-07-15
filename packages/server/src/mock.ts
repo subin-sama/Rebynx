@@ -32,16 +32,42 @@ export function buildRoutes(calls: FlowCall[]): RouteMap {
   return routes;
 }
 
-/** Next recorded call for a request; advances the per-key cursor, clamping on the last. */
+// Canonical key for a body so bodies compare regardless of key order; a body
+// captured as a JSON-string is unwrapped first so it compares to a parsed one.
+function stable(v: unknown): string {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  return '{' + Object.keys(v as Record<string, unknown>).sort()
+    .map((k) => JSON.stringify(k) + ':' + stable((v as Record<string, unknown>)[k])).join(',') + '}';
+}
+function bodyKey(v: unknown): string {
+  if (typeof v === 'string') {
+    try { const p = JSON.parse(v); if (p && typeof p === 'object') return stable(p); } catch { /* plain string */ }
+  }
+  return stable(v);
+}
+
+/**
+ * Pick the recorded call for a request. When the incoming request has a body and
+ * a call in the method+path group has a matching saved request body, that call
+ * wins (same endpoint, different payloads → different responses). Otherwise the
+ * per-key cursor advances through the group in order, clamping on the last.
+ */
 export function matchCall(
   routes: RouteMap,
   method: string,
   pathname: string,
   cursor: Map<string, number>,
+  reqBody?: unknown,
 ): FlowCall | null {
   const key = routeKey(method, pathname);
   const list = routes[key];
   if (!list || !list.length) return null;
+  if (reqBody !== undefined && reqBody !== null && reqBody !== '') {
+    const want = bodyKey(reqBody);
+    const byBody = list.find((c) => bodyKey(c.request && c.request.body) === want);
+    if (byBody) return byBody;
+  }
   const i = cursor.get(key) ?? 0;
   cursor.set(key, i + 1);
   return list[Math.min(i, list.length - 1)];
@@ -69,32 +95,39 @@ export function createMockServer(getRoutes: () => RouteMap, getTiming: () => boo
       return;
     }
     const url = new URL(req.url ?? '/', 'http://x');
-    const call = matchCall(getRoutes(), req.method ?? 'GET', url.pathname, cursor);
-    if (!call) {
-      res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', ...CORS });
-      res.end(JSON.stringify({
-        error: 'no saved call matches this request',
-        method: req.method,
-        path: url.pathname,
-        hint: 'enable a flow or call for this endpoint in the Rebynx Flows tab',
-      }));
-      return;
-    }
-    const headers: Record<string, string> = { ...CORS };
-    for (const [k, v] of Object.entries(call.response.headers ?? {})) {
-      if (!STRIP.has(k.toLowerCase())) headers[k] = v;
-    }
-    if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
-      headers['content-type'] = 'application/json; charset=utf-8';
-    }
-    const body = call.response.body;
-    const send = () => {
-      res.writeHead(call.status ?? 200, headers);
-      res.end(typeof body === 'string' ? body : JSON.stringify(body ?? null));
-    };
-    // Optionally reproduce the captured latency (clamped) to simulate the real API.
-    const delay = getTiming() && typeof call.duration === 'number' ? Math.min(Math.max(call.duration, 0), 10000) : 0;
-    if (delay > 0) setTimeout(send, delay);
-    else send();
+    // Read the request body so a request can be matched by payload, then respond.
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; if (data.length > 20_000_000) req.destroy(); });
+    req.on('end', () => {
+      let reqBody: unknown;
+      if (data) { try { reqBody = JSON.parse(data); } catch { reqBody = data; } }
+      const call = matchCall(getRoutes(), req.method ?? 'GET', url.pathname, cursor, reqBody);
+      if (!call) {
+        res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', ...CORS });
+        res.end(JSON.stringify({
+          error: 'no saved call matches this request',
+          method: req.method,
+          path: url.pathname,
+          hint: 'enable a flow or call for this endpoint in the Rebynx Flows tab',
+        }));
+        return;
+      }
+      const headers: Record<string, string> = { ...CORS };
+      for (const [k, v] of Object.entries(call.response.headers ?? {})) {
+        if (!STRIP.has(k.toLowerCase())) headers[k] = v;
+      }
+      if (!Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')) {
+        headers['content-type'] = 'application/json; charset=utf-8';
+      }
+      const body = call.response.body;
+      const send = () => {
+        res.writeHead(call.status ?? 200, headers);
+        res.end(typeof body === 'string' ? body : JSON.stringify(body ?? null));
+      };
+      // Optionally reproduce the captured latency (clamped) to simulate the real API.
+      const delay = getTiming() && typeof call.duration === 'number' ? Math.min(Math.max(call.duration, 0), 10000) : 0;
+      if (delay > 0) setTimeout(send, delay);
+      else send();
+    });
   });
 }
