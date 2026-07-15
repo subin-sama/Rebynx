@@ -130,6 +130,40 @@ export async function getFlow(dir: string, id: string): Promise<Flow | null> {
   }
 }
 
+/**
+ * Adapter: an api-ui-mapper mock map -> a Rebynx flow (the inverse of
+ * `flowToMockOverrides`). The map is `{ [path]: { endpoint?, statusCode, resBody } }`
+ * with no method (the mock matcher's path-only fallback handles that). A JSON-string
+ * `resBody` is parsed; anything else is kept verbatim. Non-object entries are skipped.
+ */
+export function mocksToFlow(
+  mocks: Record<string, unknown>,
+  name: string,
+): { name: string; calls: FlowCall[] } {
+  const calls: FlowCall[] = [];
+  let seq = 1;
+  for (const [key, raw] of Object.entries(mocks ?? {})) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const e = raw as { endpoint?: string; statusCode?: string | number; resBody?: unknown };
+    const url = typeof e.endpoint === 'string' && e.endpoint ? e.endpoint : key;
+    const status = parseInt(String(e.statusCode), 10) || 200;
+    let body: unknown = e.resBody ?? null;
+    if (typeof e.resBody === 'string') {
+      try { body = JSON.parse(e.resBody); } catch { body = e.resBody; }
+    }
+    calls.push({
+      seq: seq++,
+      method: 'GET',
+      url,
+      status,
+      ok: status < 400,
+      request: { headers: {}, body: null },
+      response: { headers: {}, body },
+    });
+  }
+  return { name, calls };
+}
+
 /** Fields of a single call that can be edited in place. */
 export interface CallPatch {
   method?: string;

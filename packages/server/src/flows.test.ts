@@ -10,6 +10,7 @@ import {
   saveFlow,
   slugify,
   updateCall,
+  mocksToFlow,
   type FlowCall,
 } from './flows.js';
 
@@ -152,6 +153,40 @@ describe('listFlows', () => {
     fs.writeFileSync(path.join(dir, '.mock-state.json'), '{"flows":["flow"],"calls":[]}');
     const list = await listFlows(dir);
     expect(list.map((f) => f.id)).toEqual(['flow']);
+  });
+});
+
+describe('mocksToFlow', () => {
+  test('maps api-mapper mocks into flow calls (status, url, parsed resBody)', () => {
+    const mocks = {
+      '/api/profile': { endpoint: '/api/profile', statusCode: '200', resBody: '{"name":"Jane"}' },
+      '/oauth/token': { endpoint: '/oauth/token', statusCode: '401', resBody: 'not json' },
+    };
+    const flow = mocksToFlow(mocks, 'imported');
+    expect(flow.name).toBe('imported');
+    expect(flow.calls).toHaveLength(2);
+    expect(flow.calls.map((c) => c.seq).sort()).toEqual([1, 2]);
+
+    const profile = flow.calls.find((c) => c.url === '/api/profile')!;
+    expect(profile.method).toBe('GET');
+    expect(profile.status).toBe(200);
+    expect(profile.ok).toBe(true);
+    expect(profile.response.body).toEqual({ name: 'Jane' }); // JSON-string → parsed
+
+    const token = flow.calls.find((c) => c.url === '/oauth/token')!;
+    expect(token.status).toBe(401);
+    expect(token.ok).toBe(false);
+    expect(token.response.body).toBe('not json'); // non-JSON kept as a string
+  });
+
+  test('falls back to the map key when endpoint is absent, and skips non-object entries', () => {
+    const flow = mocksToFlow({
+      '/keyonly': { statusCode: '200', resBody: '{}' },
+      '/bad': null,
+      '/alsobad': 'nope',
+    } as any, 'x');
+    expect(flow.calls).toHaveLength(1);
+    expect(flow.calls[0].url).toBe('/keyonly');
   });
 });
 
