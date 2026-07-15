@@ -728,6 +728,7 @@ export function createApp(doc = globalThis.document) {
       return `<div class="mock-ep"><span class="method">${esc(e.method)}</span>${link}</div>`;
     }).join('');
     const emuUrl = `http://10.0.2.2:${mockState.port}`;
+    const iosUrl = `http://localhost:${mockState.port}`;
     return `<div class="mock-banner">
       <div class="mock-banner-row">
         <span class="mock-dot"></span>
@@ -735,8 +736,8 @@ export function createApp(doc = globalThis.document) {
         <button class="mock-timing ${mockState.timing ? 'on' : ''}" title="Replay each call's captured latency">⏱ timing ${mockState.timing ? 'on' : 'off'}</button>
         <button class="mock-stop">Stop</button>
       </div>
-      ${codeBlock('point your app’s baseURL here', mockState.url)}
-      <div class="mock-emu">Android emulator can’t reach the LAN IP — use <code>${esc(emuUrl)}</code></div>
+      ${codeBlock('point your app’s baseURL here (physical device, same Wi‑Fi)', mockState.url)}
+      <div class="mock-emu">Android emulator → <code>${esc(emuUrl)}</code> · iOS simulator → <code>${esc(iosUrl)}</code></div>
       ${eps ? `<div class="mock-eps">${eps}</div>` : ''}
     </div>`;
   }
@@ -946,7 +947,7 @@ export function createApp(doc = globalThis.document) {
         </div>
         ${codeBlock('store setup', (STATE_SNIPPETS.find((s) => s.id === stateAdapter) || STATE_SNIPPETS[0]).code)}
         <div class="setup-hint">Must use the same <code>devtoolsHub</code> from <code>@rebynx/rn</code> — a fresh <code>Hub</code> won't reach the relay, so State stays empty.</div>
-        <div class="setup-note">Android emulator can't reach your LAN IP — use <code>ws://10.0.2.2:${esc(port)}</code>. A physical device uses the LAN address above (same Wi-Fi).</div>
+        <div class="setup-note">Android emulator: <code>ws://10.0.2.2:${esc(port)}</code> · iOS simulator: <code>ws://localhost:${esc(port)}</code> · physical device: the LAN address above (same Wi-Fi).</div>
       </div>`;
     renderSetupBanner($('setup-banner'));
   }

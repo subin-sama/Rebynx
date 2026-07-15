@@ -419,7 +419,7 @@ describe('Flows — mock server', () => {
     expect(document.querySelector('#main .mock-flow.on[data-id="login"]')).toBeTruthy();
   });
 
-  test('the banner shows the Android-emulator URL (10.0.2.2) alongside the LAN URL', async () => {
+  test('the banner shows LAN / Android-emulator / iOS-simulator URLs', async () => {
     stubFetch({
       '/flows': [{ id: 'login', name: 'Login', createdAt: 1, count: 2 }],
       '/mock': activeStatus({ flows: ['login'] }),
@@ -430,6 +430,7 @@ describe('Flows — mock server', () => {
     const banner = document.querySelector('#main .mock-banner').textContent;
     expect(banner).toContain('192.168.1.9:9091'); // LAN (physical device)
     expect(banner).toContain('10.0.2.2:9091');     // Android emulator
+    expect(banner).toContain('localhost:9091');     // iOS simulator
   });
 
   test('the banner lists each active endpoint as a full, hittable mock URL', async () => {
