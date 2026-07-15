@@ -558,6 +558,19 @@ describe('Flows — edit a call (payload/response/status)', () => {
     expect(patches[0].body.status).toBe(500);
   });
 
+  test('the call editor renders a highlighted backdrop with coloured JSON', async () => {
+    const app = createApp(document);
+    await openDetail(app);
+    app.editCall(1);
+    const wrap = document.querySelector('#main .edit-req').closest('.hl-editor');
+    expect(wrap).toBeTruthy();
+    const back = wrap.querySelector('.hl-back');
+    expect(back.querySelector('.j-key')).toBeTruthy(); // "a": rendered as a key
+    expect(back.innerHTML).toContain('j-num');          // the number 1
+    // the textarea still holds the raw editable text
+    expect(document.querySelector('#main .edit-req').value).toContain('"a": 1');
+  });
+
   test('a JSON-string body is shown as readable JSON and saved back as a string', async () => {
     const jsFlow = {
       id: 'js', name: 'JS', createdAt: 1, calls: [

@@ -102,11 +102,10 @@ export const MAX_EVENTS = 1000;
 const time = (ts) =>
   new Date(ts).toLocaleTimeString('en-GB', { hour12: false }) + '.' + String(ts % 1000).padStart(3, '0');
 
-/** Pretty-print a value as JSON with lightweight token colouring. `indent` 0 = compact. */
-export function syntaxHighlight(value, indent = 2) {
-  const json = JSON.stringify(value, null, indent);
-  if (json === undefined) return esc(String(value));
-  return esc(json).replace(
+// Colour JSON tokens in already-HTML-escaped text (works on any JSON-ish source,
+// even mid-edit, so it can highlight a live textarea's contents).
+function colorizeJson(escaped) {
+  return escaped.replace(
     /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
     (match) => {
       let cls = 'j-num';
@@ -116,6 +115,18 @@ export function syntaxHighlight(value, indent = 2) {
       return `<span class="${cls}">${match}</span>`;
     },
   );
+}
+
+/** Pretty-print a value as JSON with lightweight token colouring. `indent` 0 = compact. */
+export function syntaxHighlight(value, indent = 2) {
+  const json = JSON.stringify(value, null, indent);
+  if (json === undefined) return esc(String(value));
+  return colorizeJson(esc(json));
+}
+
+/** Colour arbitrary JSON source text (for the editor's highlight backdrop). */
+export function highlightSource(text) {
+  return colorizeJson(esc(text == null ? '' : String(text)));
 }
 
 /** A copyable, highlighted JSON panel. The <pre>'s textContent is the raw JSON. */
@@ -784,13 +795,23 @@ export function createApp(doc = globalThis.document) {
   }
 
   // The editor that replaces a call's read-only panels while editing.
+  // A textarea layered over a syntax-highlighted <pre> backdrop: the textarea's
+  // own text is transparent (only its caret shows), so you see the coloured
+  // backdrop through it. start() keeps the backdrop in sync on input + scroll.
+  function hlField(cls, text) {
+    return `<div class="hl-editor">
+      <pre class="hl-back" aria-hidden="true">${highlightSource(text)}\n</pre>
+      <textarea class="${cls}" spellcheck="false">${esc(text)}</textarea>
+    </div>`;
+  }
+
   function callEditor(f, c) {
     return `<div class="call-editor">
       <div class="edit-field"><span class="json-label">status</span><input class="edit-status" value="${esc(c.status != null ? c.status : 200)}" /></div>
       <div class="json-label">request body (payload)</div>
-      <textarea class="edit-req" spellcheck="false">${esc(prettyBody(c.request && c.request.body))}</textarea>
+      ${hlField('edit-req', prettyBody(c.request && c.request.body))}
       <div class="json-label">response body</div>
-      <textarea class="edit-res" spellcheck="false">${esc(prettyBody(c.response && c.response.body))}</textarea>
+      ${hlField('edit-res', prettyBody(c.response && c.response.body))}
       <div class="edit-error"></div>
       <div class="edit-btns">
         <button class="edit-cancel">Cancel</button>
@@ -936,6 +957,23 @@ export function createApp(doc = globalThis.document) {
       const tab = ev.target.closest('.tab');
       if (tab) setActive(tab.dataset.tab);
     });
+    // Keep each editor's highlight backdrop in sync with its textarea.
+    const syncBackdrop = (ta) => {
+      const back = ta.parentElement && ta.parentElement.querySelector('.hl-back');
+      if (!back) return;
+      back.innerHTML = highlightSource(ta.value) + '\n';
+      back.scrollTop = ta.scrollTop;
+      back.scrollLeft = ta.scrollLeft;
+    };
+    main().addEventListener('input', (ev) => {
+      const ta = ev.target.closest && ev.target.closest('.edit-req, .edit-res');
+      if (ta) syncBackdrop(ta);
+    });
+    main().addEventListener('scroll', (ev) => {
+      const ta = ev.target;
+      if (ta.classList && (ta.classList.contains('edit-req') || ta.classList.contains('edit-res'))) syncBackdrop(ta);
+    }, true);
+
     $('save-flow').addEventListener('click', saveFlow);
     $('filter').addEventListener('input', (ev) => setFilter(ev.target.value));
     $('clear').addEventListener('click', clearAll);

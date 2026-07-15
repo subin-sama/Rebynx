@@ -160,8 +160,20 @@
       .edit-field { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
       .edit-status { width: 90px; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 8px; font-family: var(--mono); outline: none; }
       .edit-status:focus { border-color: var(--accent); }
-      .call-editor textarea { width: 100%; min-height: 120px; margin: 4px 0 8px; background: var(--panel); border: 1px solid var(--border); color: #c8cdd6; border-radius: 6px; padding: 8px 10px; font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; outline: none; white-space: pre; }
-      .call-editor textarea:focus { border-color: var(--accent); }
+      /* Highlighted editor: transparent textarea layered over a coloured <pre>.
+         Both share identical geometry so the caret lines up with the colours. */
+      .hl-editor { position: relative; height: 160px; margin: 4px 0 8px; }
+      .hl-editor .hl-back, .hl-editor textarea {
+        position: absolute; inset: 0; margin: 0;
+        box-sizing: border-box; padding: 8px 10px;
+        border: 1px solid var(--border); border-radius: 6px;
+        font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2;
+        white-space: pre; overflow: auto; word-wrap: normal;
+      }
+      .hl-editor .hl-back { z-index: 0; background: var(--panel); color: #c8cdd6; border-color: transparent; pointer-events: none; }
+      .hl-editor textarea { z-index: 1; background: transparent; color: transparent; caret-color: var(--text); resize: none; outline: none; }
+      .hl-editor textarea:focus { border-color: var(--accent); }
+      .hl-editor textarea::selection { background: rgba(110, 168, 254, 0.35); }
       .edit-error { color: var(--red); font-size: 11px; min-height: 14px; }
       .edit-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
       .edit-save { border-color: var(--green); color: var(--green); }
