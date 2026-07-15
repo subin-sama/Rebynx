@@ -29,6 +29,23 @@ describe('RingBuffer', () => {
   });
 });
 
+describe('sanitize redaction', () => {
+  it('redacts deny-list keys but honours the allow-list exceptions', () => {
+    const out = sanitize(
+      { authorization: 'Bearer x', passwordPolicy: 'strong', normal: 1 },
+      { allowKeys: ['passwordPolicy'] },
+    ) as Record<string, unknown>;
+    expect(out.authorization).toBe('[REDACTED]');
+    expect(out.passwordPolicy).toBe('strong'); // exempted despite containing "password"
+    expect(out.normal).toBe(1);
+  });
+
+  it('redacts common auth patterns by default', () => {
+    const out = sanitize({ bearer: 'x', credential: 'y', api_key: 'z', jwt: 'w' }) as Record<string, unknown>;
+    expect(out).toEqual({ bearer: '[REDACTED]', credential: '[REDACTED]', api_key: '[REDACTED]', jwt: '[REDACTED]' });
+  });
+});
+
 describe('sanitize', () => {
   it('should convert primitive values correctly', () => {
     expect(sanitize(null)).toBeNull();

@@ -21,7 +21,10 @@ export interface SanitizeOpts {
   maxDepth?: number;
   maxString?: number;
   maxArray?: number;
+  /** Key substrings whose values are replaced with "[REDACTED]". */
   redactKeys?: string[];
+  /** Key substrings that are NEVER redacted, even if they match redactKeys. */
+  allowKeys?: string[];
 }
 
 const DEFAULT_REDACT_KEYS = [
@@ -31,6 +34,11 @@ const DEFAULT_REDACT_KEYS = [
   'password',
   'secret',
   'apikey',
+  'api_key',
+  'api-key',
+  'bearer',
+  'credential',
+  'jwt',
   'pwd',
   'privatekey',
   'passphrase',
@@ -45,6 +53,7 @@ const DEFAULT_REDACT_KEYS = [
 export function sanitize(value: unknown, opts: SanitizeOpts = {}): unknown {
   const { maxDepth = 6, maxString = 10_000, maxArray = 200 } = opts;
   const redactList = opts.redactKeys || DEFAULT_REDACT_KEYS;
+  const allowList = opts.allowKeys || [];
   const seen = new WeakSet<object>();
 
   function walk(v: unknown, depth: number): unknown {
@@ -77,7 +86,8 @@ export function sanitize(value: unknown, opts: SanitizeOpts = {}): unknown {
       for (const k of Object.keys(obj)) {
         try {
           const lowerK = k.toLowerCase();
-          const shouldRedact = redactList.some(rk => lowerK.includes(rk.toLowerCase()));
+          const allowed = allowList.some(ak => lowerK.includes(ak.toLowerCase()));
+          const shouldRedact = !allowed && redactList.some(rk => lowerK.includes(rk.toLowerCase()));
           if (shouldRedact) {
             out[k] = '[REDACTED]';
           } else {
