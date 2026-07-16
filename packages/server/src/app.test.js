@@ -541,6 +541,36 @@ describe('Flows — save/delete without native dialogs (Electron-safe)', () => {
   });
 });
 
+describe('Export log', () => {
+  beforeEach(setupDom);
+
+  const logEvent = (n, message, extra = {}) => ({
+    id: 'l' + n, ts: 1700000000000 + n, type: 'log', level: 'log', message, args: [], source: null, ...extra,
+  });
+
+  test('exports only the active tab’s events that match the filter', () => {
+    const app = createApp(document);
+    app.setActive('logs');
+    app.ingest(logEvent(1, 'hello world'));
+    app.ingest(logEvent(2, 'goodbye'));
+    app.ingest(netEvent(1)); // a network event — must not be in a logs export
+    const p = app.logExportPayload();
+    expect(p.tab).toBe('logs');
+    expect(p.events.every((e) => e.type === 'log')).toBe(true);
+    expect(p.count).toBe(2);
+
+    app.setFilter('hello');
+    const filtered = app.logExportPayload();
+    expect(filtered.count).toBe(1);
+    expect(filtered.events[0].message).toBe('hello world');
+  });
+
+  test('a tab with no plugin (Setup) has nothing to export', () => {
+    const app = createApp(document);
+    expect(app.logExportPayload()).toBeNull(); // starts on Setup
+  });
+});
+
 describe('Flows — import mocks', () => {
   beforeEach(setupDom);
   const flush = () => new Promise((r) => setTimeout(r, 0));

@@ -663,6 +663,19 @@ export function createApp(doc = globalThis.document) {
     loadFlows();
   }
 
+  /** Trigger a browser download of `obj` as pretty JSON. */
+  function downloadJson(filename, obj) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = doc.createElement('a');
+    a.href = url;
+    a.download = filename;
+    doc.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   // Download the flow JSON (native format) so it can be imported elsewhere,
   // e.g. into api-ui-mapper as mock overrides.
   async function exportFlow(id) {
@@ -670,19 +683,34 @@ export function createApp(doc = globalThis.document) {
       const res = await fetch('/flows/' + encodeURIComponent(id));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const flow = await res.json();
-      const blob = new Blob([JSON.stringify(flow, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = doc.createElement('a');
-      a.href = url;
-      a.download = id + '.json';
-      doc.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadJson(id + '.json', flow);
       flash(`Exported ${id}.json`);
     } catch (err) {
       alert('Could not export flow: ' + err.message);
     }
+  }
+
+  // What an Export of the current tab would contain — the same events the tab is
+  // showing (plugin + filter). Null when the tab has no event plugin (Setup/Flows).
+  function logExportPayload() {
+    const plugin = PLUGINS.find((p) => p.id === active);
+    if (!plugin) return null;
+    const list = events.filter((e) => plugin.accepts(e) && matches(e));
+    return { tab: active, exportedAt: new Date().toISOString(), count: list.length, events: list };
+  }
+
+  function exportLog() {
+    const payload = logExportPayload();
+    if (!payload) {
+      alert('Nothing to export here — open Logs, Network, State or Inspect.');
+      return;
+    }
+    if (!payload.count) {
+      alert(`No ${active} events to export.`);
+      return;
+    }
+    downloadJson(`rebynx-${active}-${Date.now()}.json`, payload);
+    flash(`Exported ${payload.count} ${active} event(s)`);
   }
 
   // ---- mock server (replay saved flows as a live API) ----
@@ -1041,6 +1069,7 @@ export function createApp(doc = globalThis.document) {
     }, true);
 
     $('save-flow').addEventListener('click', saveFlow);
+    $('export-log')?.addEventListener('click', exportLog);
     $('filter').addEventListener('input', (ev) => setFilter(ev.target.value));
     $('clear').addEventListener('click', clearAll);
     main().addEventListener('click', (ev) => {
@@ -1132,6 +1161,8 @@ export function createApp(doc = globalThis.document) {
     editCall,
     saveCallEdit,
     importMocks,
+    logExportPayload,
+    exportLog,
     get appsConnected() { return appsConnected; },
     get stateAdapter() { return stateAdapter; },
     get statePaused() { return statePaused; },
