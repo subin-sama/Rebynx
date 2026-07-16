@@ -41,6 +41,12 @@ export interface NetworkEvent extends Base {
   reqBody?: unknown;
   resHeaders?: Record<string, string>;
   resBody?: unknown;
+  /** Raw Error.stack captured where the request was made (the relay symbolicates it). */
+  stack?: string;
+  /** "file:line" of the calling code — filled in by the relay via Metro. */
+  source?: string | null;
+  /** Name of the function that made the call — filled in by the relay. */
+  callFn?: string;
 }
 
 export interface StateEvent extends Base {

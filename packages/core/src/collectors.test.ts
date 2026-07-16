@@ -163,6 +163,38 @@ describe('collectors', () => {
 
       uninstall();
     });
+
+    it('captures the calling code’s stack on the request', () => {
+      class MockXHR {
+        static last: MockXHR;
+        status = 200;
+        responseType = '';
+        responseText = '{}';
+        private listeners: Record<string, () => void> = {};
+        constructor() { MockXHR.last = this; }
+        open(_m: string, _u: string) {}
+        send(_b?: unknown) {}
+        setRequestHeader(_k: string, _v: string) {}
+        addEventListener(event: string, listener: () => void) { this.listeners[event] = listener; }
+        getAllResponseHeaders() { return ''; }
+        finish() { this.listeners.loadend(); }
+      }
+      (globalThis as any).XMLHttpRequest = MockXHR;
+      const uninstall = installNetwork(hub);
+
+      function callTheApi() { // the app function we want the call site to blame
+        const xhr = new XMLHttpRequest();
+        xhr.open('GET', 'https://example.test/thing');
+        xhr.send();
+      }
+      callTheApi();
+
+      const start: any = emittedEvents.find((e: any) => e.phase === 'start');
+      expect(typeof start.stack).toBe('string');
+      expect(start.stack).toContain('callTheApi'); // the caller is in the captured stack
+
+      uninstall();
+    });
   });
 
   describe('createReduxMiddleware', () => {

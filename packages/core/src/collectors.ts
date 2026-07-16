@@ -46,6 +46,17 @@ interface XHRMeta {
   reqHeaders: Record<string, string>;
   start: number;
   suppress?: boolean;
+  stack?: string;
+}
+
+/**
+ * The caller's stack at request time. Under Hermes these frames point at the
+ * bundle, so the relay symbolicates them via Metro into a real file:line —
+ * see packages/server/src/symbolicate.ts.
+ */
+function captureStack(): string | undefined {
+  const s = new Error().stack;
+  return typeof s === 'string' ? s : undefined;
 }
 
 let fetchDepth = 0;
@@ -157,6 +168,9 @@ export function installNetwork(hub: Hub): Teardown {
         reqHeaders: {},
         start: 0,
         suppress: fetchDepth > 0,
+        // Captured here (not in send) so the frames still include the app code
+        // that kicked the request off. The relay turns it into a file:line.
+        stack: captureStack(),
       } as XHRMeta;
       return origOpen.call(this, method, url, ...rest);
     };
@@ -179,6 +193,7 @@ export function installNetwork(hub: Hub): Teardown {
           url: meta.url,
           reqHeaders: meta.reqHeaders,
           reqBody: sanitize(body),
+          stack: meta.stack,
         });
         this.addEventListener('loadend', () => {
           hub.emit({
