@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -359,5 +360,69 @@ describe('POST /flows/import (api-mapper mocks → flow)', () => {
       body: JSON.stringify({ name: 'x', mocks: 'nope' }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('API call-site symbolication', () => {
+  const netEvent = (stack: string) => JSON.stringify({
+    kind: 'event',
+    event: { id: 'n1', ts: 1, type: 'network', phase: 'start', reqId: 'r1', method: 'GET', url: 'https://api/x', stack },
+  });
+
+  async function relayWithMetro(metroUrl: string) {
+    const srv = createRelayServer({ flowsDir, mockPort: 0, metroUrl });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    const p = (srv.address() as AddressInfo).port;
+    const wsUrl = `ws://127.0.0.1:${p}`;
+    const browser = await openWs(wsUrl);
+    const got: any[] = [];
+    browser.on('message', (d) => {
+      const m = JSON.parse(d.toString());
+      if (m.kind === 'event') got.push(m.event);
+    });
+    browser.send(JSON.stringify({ kind: 'hello', role: 'browser' }));
+    await new Promise((r) => setTimeout(r, 30));
+    const app = await openWs(wsUrl);
+    app.send(JSON.stringify({ kind: 'hello', role: 'app' }));
+    return { srv, browser, app, got };
+  }
+
+  test('re-sends the network event with the symbolicated file:line + function', async () => {
+    const metro = http.createServer((req, res) => {
+      let d = '';
+      req.on('data', (c) => (d += c));
+      req.on('end', () => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ stack: [{ methodName: 'callApi', file: '/app/src/api.ts', lineNumber: 42, column: 7 }] }));
+      });
+    });
+    await new Promise<void>((r) => metro.listen(0, '127.0.0.1', r));
+    const mPort = (metro.address() as AddressInfo).port;
+
+    const { srv, browser, app, got } = await relayWithMetro(`http://127.0.0.1:${mPort}`);
+    try {
+      app.send(netEvent('    at callApi (/app/index.bundle:1:100)'));
+      await waitFor(() => got.some((e) => e.source));
+      const enriched = got.find((e) => e.source);
+      expect(enriched.reqId).toBe('r1');
+      expect(enriched.source).toBe('/app/src/api.ts:42');
+      expect(enriched.callFn).toBe('callApi');
+    } finally {
+      app.close(); browser.close();
+      await new Promise((r) => srv.close(r));
+      await new Promise((r) => metro.close(r));
+    }
+  });
+
+  test('still relays the event when metro is unreachable', async () => {
+    const { srv, browser, app, got } = await relayWithMetro('http://127.0.0.1:1');
+    try {
+      app.send(netEvent('    at callApi (/app/index.bundle:1:100)'));
+      await waitFor(() => got.length >= 1);
+      expect(got[0].reqId).toBe('r1'); // relayed, just without a call site
+    } finally {
+      app.close(); browser.close();
+      await new Promise((r) => srv.close(r));
+    }
   });
 });

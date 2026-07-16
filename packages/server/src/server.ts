@@ -29,6 +29,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { deleteFlow, getFlow, listFlows, saveFlow, updateCall, mocksToFlow } from './flows.js';
 import type { FlowCall } from './flows.js';
 import { buildRoutes, createMockServer, type RouteMap } from './mock.js';
+import { parseStack, firstAppFrame, symbolicate } from './symbolicate.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RING_SIZE = 500;
@@ -180,6 +181,9 @@ export interface RelayOptions {
   publicDir?: string;
   /** Port for the mock API server. Defaults to DEVTOOLS_MOCK_PORT or 9091. */
   mockPort?: number;
+  /** Metro dev server, used to symbolicate API call sites. Defaults to
+   *  DEVTOOLS_METRO_URL or http://localhost:8081. */
+  metroUrl?: string;
 }
 
 /** Build the relay http.Server (with WebSocket relay attached). Does not listen. */
@@ -385,6 +389,24 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
     return true;
   }
 
+  // ---- API call sites: turn a captured stack into "file:line" via Metro ----
+  const metroUrl = opts.metroUrl ?? process.env.DEVTOOLS_METRO_URL ?? 'http://localhost:8081';
+  // Memoised per call site — an app hits the same lines over and over, and each
+  // miss costs one POST to Metro.
+  const callSites = new Map<string, { source: string; fn: string } | null>();
+
+  async function resolveCallSite(stack: string): Promise<{ source: string; fn: string } | null> {
+    const frame = firstAppFrame(parseStack(stack));
+    if (!frame) return null;
+    const key = `${frame.file}:${frame.lineNumber}:${frame.column}`;
+    if (callSites.has(key)) return callSites.get(key) ?? null;
+    const out = await symbolicate([frame], metroUrl);
+    const f = out?.[0];
+    const site = f?.file ? { source: `${f.file}:${f.lineNumber}`, fn: f.methodName || frame.methodName || '' } : null;
+    callSites.set(key, site);
+    return site;
+  }
+
   const ring: unknown[] = [];
   const apps = new Set<WebSocket>();
   const browsers = new Set<WebSocket>();
@@ -475,6 +497,22 @@ export function createRelayServer(opts: RelayOptions = {}): http.Server {
           ring.push(msg.event);
           if (ring.length > RING_SIZE) ring.shift();
           for (const b of browsers) if (b.readyState === b.OPEN) b.send(raw);
+          // Resolve the API call site out of band — never delay or reorder the
+          // live stream. On success we patch the ring's event object (so replay
+          // has it too) and re-send it; the client merges network events by
+          // reqId, so the row just gains its file:line link a moment later.
+          const ev = msg.event;
+          if (ev?.type === 'network' && typeof ev.stack === 'string') {
+            void resolveCallSite(ev.stack)
+              .then((site) => {
+                if (!site) return;
+                ev.source = site.source;
+                ev.callFn = site.fn;
+                const patched = JSON.stringify({ kind: 'event', event: ev });
+                for (const b of browsers) if (b.readyState === b.OPEN) b.send(patched);
+              })
+              .catch(() => { /* a missing call site must never break relaying */ });
+          }
           break;
         }
         case 'command': {

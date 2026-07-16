@@ -541,6 +541,29 @@ describe('Flows — save/delete without native dialogs (Electron-safe)', () => {
   });
 });
 
+describe('Network — API call site', () => {
+  beforeEach(setupDom);
+
+  test('renders the calling function + a clickable file:line link', () => {
+    const app = createApp(document);
+    app.setActive('network');
+    app.ingest(netEvent(1, { source: '/app/src/api.ts:42', callFn: 'callApi' }));
+    const row = document.querySelector('#main .row');
+    expect(row.textContent).toContain('callApi');
+    const src = row.querySelector('.src');
+    expect(src).toBeTruthy();
+    expect(src.dataset.file).toBe('/app/src/api.ts');
+    expect(src.dataset.line).toBe('42');
+  });
+
+  test('a call without a resolved source renders no link', () => {
+    const app = createApp(document);
+    app.setActive('network');
+    app.ingest(netEvent(2));
+    expect(document.querySelector('#main .row .src')).toBeNull();
+  });
+});
+
 describe('Export log', () => {
   beforeEach(setupDom);
 

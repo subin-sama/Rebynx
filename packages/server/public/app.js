@@ -260,6 +260,7 @@ export function rowNet(e) {
         ${jsonBlock('Response' + (e.status != null ? ' · ' + e.status : ''), { headers: e.resHeaders, body: e.resBody })}
       </details>
     </span>
+    ${e.source ? `<span class="call-site">${e.callFn ? `<span class="call-fn">${esc(e.callFn)}</span>` : ''}${srcLink(e.source)}</span>` : ''}
     <span class="dur">${e.duration != null ? e.duration + 'ms' : ''}</span>
   </div>`;
 }

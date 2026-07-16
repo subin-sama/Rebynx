@@ -111,6 +111,9 @@
       .status.pending { color: var(--yellow); }
       .url { flex: 1; word-break: break-all; min-width: 0; }
       .dur { color: var(--muted); flex-shrink: 0; }
+      /* Which line of your code fired this API call (symbolicated via Metro) */
+      .call-site { display: flex; gap: 6px; align-items: baseline; flex-shrink: 0; font-size: 11px; }
+      .call-fn { color: var(--yellow); }
       .store-tag { color: var(--accent); flex-shrink: 0; }
       .action-tag { color: var(--yellow); flex-shrink: 0; }
       details { margin: 6px 0 2px; }
